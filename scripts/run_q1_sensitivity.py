@@ -105,9 +105,17 @@ def run_sensitivity(
         label = ratio_label(ratio)
         scenario_dir = output_root / "scenarios" / f"reserve_{label}"
         try:
-            result = run(scenario_dir, generate_plots=False, reserve_ratio_override=ratio)
+            result = run(
+                scenario_dir,
+                generate_plots=False,
+                reserve_ratio_override=ratio,
+                compute_pareto=False,
+            )
         except RuntimeError as error:
-            summary_rows.append([label, "不可行", "", "", "", str(error)])
+            summary_rows.append([
+                label, "不可行", "", "", "",
+                f"至少一个服务区无可行组批（按编号求解首先检测到：{error}）",
+            ])
             continue
         summary_rows.append([
             label, "可行", int(result["trips"]), result["energy_kwh"], result["duration_s"], ""

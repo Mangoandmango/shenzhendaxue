@@ -1,0 +1,4 @@
+[optimization]
+status = "pending"
+description = "异构无人机多点多架次运输调度，复用公共航段与能耗模块。"
+

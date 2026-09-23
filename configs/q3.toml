@@ -1,0 +1,6 @@
+[communication]
+status = "pending"
+trajectory_time_step_s = 5
+verification_time_step_s = 1
+description = "联合调度模型确定后填写中继候选位置与求解参数。"
+

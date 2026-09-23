@@ -1,0 +1,15 @@
+[physics]
+gravity_mps2 = 9.81
+joules_per_kwh = 3600000.0
+earth_radius_m = 6371008.8
+terrain_clearance_m = 50.0
+service_operation_height_m = 30.0
+
+[paths]
+node_workbook = "data/raw/base/调度中心与服务区.xlsx"
+cargo_workbook = "data/raw/base/物资需求与配送时限.xlsx"
+transport_workbook = "data/raw/base/运输无人机数据.xlsx"
+relay_workbook = "data/raw/base/中继无人机数据.xlsx"
+communication_workbook = "data/raw/base/通信链路参数.xlsx"
+dem = "data/raw/geo/镇龙乡及周边地理数据/数字高程模型数据（DEM）/镇龙乡及周边30米DEM.tif"
+

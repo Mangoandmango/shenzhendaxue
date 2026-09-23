@@ -1,0 +1,5 @@
+[partition]
+status = "pending"
+group_counts = [2, 3]
+description = "冻结问题三任务结构后填写分区目标与资源核算参数。"
+

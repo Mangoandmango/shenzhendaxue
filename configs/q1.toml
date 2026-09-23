@@ -1,0 +1,8 @@
+[optimization]
+objective_order = ["trips", "energy", "duration"]
+reserve_ratio_override = -1.0
+
+[output]
+directory = "outputs/q1"
+figure_dpi = 180
+

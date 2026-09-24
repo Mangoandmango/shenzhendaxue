@@ -1,0 +1,15 @@
+[optimization]
+status = "frozen-comparator"
+description = "增强型方案A（软约束对照版）：医疗物资期望送达时间及首批保障截止时间为硬约束；普通物资期望送达时间仅计入加权迟到目标。采用多起点服务区序列、DP切分、资源列表调度、冲突修复和四目标Pareto筛选。"
+seed_base = 20260901
+random_seed_count = 20
+max_iterations = 5000
+stall_iterations = 800
+time_limit_per_seed_s = 60.0
+repair_limit = 30
+
+[output]
+directory = "outputs/q2_soft"
+
+[cache]
+leg_geometry = "data/cache/leg_geometry.csv"

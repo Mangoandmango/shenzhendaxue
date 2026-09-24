@@ -1,0 +1,76 @@
+{
+  "all_representatives_passed": true,
+  "baseline_objective": {
+    "energy_kwh": 60.409099725860294,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 10167.413896418915,
+    "trip_count": 18,
+    "weighted_soft_tardiness": 353233.1206018006
+  },
+  "best_objective": {
+    "energy_kwh": 59.852468862870126,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 9796.155071302372,
+    "trip_count": 16,
+    "weighted_soft_tardiness": 345087.79307321674
+  },
+  "checks": {
+    "通过": 385
+  },
+  "configuration": {
+    "battery_occupancy": "架次开始至返航后充至100%",
+    "drone_occupancy": "架次开始至返航完成",
+    "max_iterations": 5000,
+    "random_seed_count": 20,
+    "repair_limit": 30,
+    "seed_base": 20260901,
+    "stall_iterations": 800,
+    "time_limit_per_seed_s": 60.0
+  },
+  "pareto_count": 39,
+  "pareto_representatives": {
+    "及时性优先": {
+      "energy_kwh": 67.37521038380218,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 10940.874592637967,
+      "trip_count": 19,
+      "weighted_soft_tardiness": 199679.54398903687
+    },
+    "完工时间优先": {
+      "energy_kwh": 60.40730109337593,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 9626.15344120785,
+      "trip_count": 17,
+      "weighted_soft_tardiness": 333401.39627793565
+    },
+    "最少架次优先": {
+      "energy_kwh": 63.34763522797024,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 13887.59763586255,
+      "trip_count": 14,
+      "weighted_soft_tardiness": 901267.3029259634
+    },
+    "综合折中": {
+      "energy_kwh": 59.852468862870126,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 9796.155071302372,
+      "trip_count": 16,
+      "weighted_soft_tardiness": 345087.79307321674
+    },
+    "能耗优先": {
+      "energy_kwh": 59.06429310113912,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 10434.537557621728,
+      "trip_count": 16,
+      "weighted_soft_tardiness": 443290.13436995103
+    }
+  },
+  "selection_rule": "医疗和首批保障时限为硬约束；普通物资期望送达时间为软约束；四目标Pareto前沿上min-max归一化等权理想点距离最小"
+}

@@ -1,0 +1,27 @@
+{
+  "version": "q2_scheme_a_soft_expected_delivery",
+  "purpose": "与普通物资期望送达时间为硬约束的版本进行独立对照",
+  "constraint_policy": {
+    "medical_expected_delivery": "hard",
+    "first_batch_deadline": "hard",
+    "ordinary_expected_delivery": "soft_weighted_tardiness"
+  },
+  "code_entry": "scripts/run_q2_soft.py",
+  "configuration": "configs/q2_soft.toml",
+  "isolated_modules": [
+    "src/uav_rescue/models/q2_transport_soft.py",
+    "src/uav_rescue/solvers/q2_soft_solver.py",
+    "src/uav_rescue/cli/q2_soft.py",
+    "src/uav_rescue/validation/q2_soft.py"
+  ],
+  "result_directory": "outputs/q2_soft",
+  "formal_run": {
+    "hard_violation_count": 0,
+    "pareto_count": 39,
+    "representative": "综合折中",
+    "weighted_soft_tardiness": 345087.79307321674,
+    "makespan_s": 9796.155071302372,
+    "energy_kwh": 59.852468862870126,
+    "trip_count": 16
+  }
+}

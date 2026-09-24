@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import math
 import random
 import time
+from typing import Callable
 
 from uav_rescue.domain import Box, LegGeometry, Node, TransportBattery, TransportDrone, TransportUnit
 from uav_rescue.models.q2_transport import (
@@ -33,7 +34,7 @@ PROFILE_WEIGHTS: tuple[tuple[str, tuple[float, float, float]], ...] = (
     ("资源节约", (0.20, 0.45, 0.35)),
 )
 
-DESTROY_OPERATORS = (
+BASE_DESTROY_OPERATORS = (
     "random_box",
     "whole_trip",
     "critical_deadline",
@@ -42,6 +43,15 @@ DESTROY_OPERATORS = (
     "resource_bottleneck",
     "route_segment",
 )
+
+CRITICAL_DESTROY_OPERATORS = (
+    "critical_last_trip",
+    "critical_unit_chain",
+    "critical_battery_chain",
+    "critical_heavy_c",
+)
+
+DESTROY_OPERATORS = BASE_DESTROY_OPERATORS + CRITICAL_DESTROY_OPERATORS
 
 REPAIR_OPERATORS = (
     "greedy",
@@ -147,6 +157,52 @@ def _quality_key(
         float(schedule.objective.hard_violation_count),
         schedule.objective.hard_tardiness_s,
         _soft_score(schedule, weights, scales),
+    )
+
+
+def _search_key(
+    schedule: ScheduleResult,
+    weights: tuple[float, float, float],
+    scales: tuple[float, float, float],
+    objective_mode: str,
+) -> tuple[float, ...]:
+    if objective_mode == "time_lex":
+        objective = schedule.objective
+        return (
+            float(objective.hard_violation_count),
+            objective.hard_tardiness_s,
+            objective.makespan_s,
+            objective.energy_kwh,
+            float(objective.trip_count),
+        )
+    if objective_mode != "weighted":
+        raise ValueError(f"未知目标模式：{objective_mode}")
+    return _quality_key(schedule, weights, scales)
+
+
+def _acceptance_delta(
+    candidate: ScheduleResult,
+    current: ScheduleResult,
+    weights: tuple[float, float, float],
+    scales: tuple[float, float, float],
+    objective_mode: str,
+) -> float:
+    if objective_mode == "time_lex":
+        return (
+            (candidate.objective.hard_tardiness_s - current.objective.hard_tardiness_s)
+            / max(scales[0], 1.0)
+            + (candidate.objective.makespan_s - current.objective.makespan_s)
+            / max(scales[0], 1.0)
+            + 0.01 * (candidate.objective.energy_kwh - current.objective.energy_kwh)
+            / max(scales[1], 1.0)
+            + 0.005 * (candidate.objective.trip_count - current.objective.trip_count)
+            / max(scales[2], 1.0)
+        )
+    candidate_key = _quality_key(candidate, weights, scales)
+    current_key = _quality_key(current, weights, scales)
+    return (
+        (candidate_key[1] - current_key[1]) / max(scales[0], 1.0)
+        + candidate_key[2] - current_key[2]
     )
 
 
@@ -422,10 +478,55 @@ def _destroy(
                 box_id for box_id in trip.route.box_ids
                 if boxes[box_id].service_id in selected
             }
+    elif operator == "critical_last_trip":
+        critical_index = max(
+            range(len(solution.trips)),
+            key=lambda index: (scheduled_by_index[index].return_s, index),
+        )
+        removed = set(solution.trips[critical_index].route.box_ids)
+    elif operator in {"critical_unit_chain", "critical_battery_chain"}:
+        critical_index = max(
+            range(len(solution.trips)),
+            key=lambda index: (scheduled_by_index[index].return_s, index),
+        )
+        critical_trip = scheduled_by_index[critical_index]
+        attribute = "unit_id" if operator == "critical_unit_chain" else "battery_id"
+        resource_id = getattr(critical_trip, attribute)
+        ranked_indexes = sorted(
+            (
+                index for index in range(len(solution.trips))
+                if getattr(scheduled_by_index[index], attribute) == resource_id
+            ),
+            key=lambda index: (-scheduled_by_index[index].return_s, index),
+        )
+        removed = set()
+        for index in ranked_indexes:
+            removed.update(solution.trips[index].route.box_ids)
+            if len(removed) >= removal_count:
+                break
+    elif operator == "critical_heavy_c":
+        ranked_indexes = sorted(
+            range(len(solution.trips)),
+            key=lambda index: (
+                solution.trips[index].model != "C",
+                -scheduled_by_index[index].return_s,
+                -sum(boxes[box_id].mass_kg for box_id in solution.trips[index].route.box_ids),
+                index,
+            ),
+        )
+        removed = set()
+        for index in ranked_indexes:
+            removed.update(solution.trips[index].route.box_ids)
+            if len(removed) >= removal_count:
+                break
     else:
         raise ValueError(f"未知破坏算子：{operator}")
 
-    if len(removed) > removal_count and operator not in {"whole_trip", "high_energy", "resource_bottleneck"}:
+    whole_route_operators = {
+        "whole_trip", "high_energy", "resource_bottleneck", "critical_last_trip",
+        "critical_unit_chain", "critical_battery_chain", "critical_heavy_c",
+    }
+    if len(removed) > removal_count and operator not in whole_route_operators:
         removed = set(rng.sample(sorted(removed), removal_count))
     return _remove_boxes(solution, removed, boxes)
 
@@ -552,6 +653,63 @@ def _apply_insertion(solution: ALNSSolution, option: _InsertionOption) -> ALNSSo
     return ALNSSolution(tuple(trips))
 
 
+def _partial_exact_key(
+    schedule: ScheduleResult,
+    boxes: dict[str, Box],
+) -> tuple[float, ...]:
+    """只评价已插入货箱，避免部分解因“缺箱”被统一判为不可行。"""
+
+    late_count = 0
+    tardiness = 0.0
+    for trip in schedule.trips:
+        for box_id in trip.route.box_ids:
+            deadline = hard_deadline_s(boxes[box_id])
+            if deadline is None:
+                continue
+            delay = max(0.0, trip.delivery_time(box_id) - deadline)
+            if delay > 1e-8:
+                late_count += 1
+                tardiness += delay
+    return (
+        float(late_count),
+        tardiness,
+        schedule.objective.makespan_s,
+        schedule.objective.energy_kwh,
+        float(schedule.objective.trip_count),
+    )
+
+
+def _choose_exact_insertion(
+    solution: ALNSSolution,
+    options: list[_InsertionOption],
+    boxes: dict[str, Box],
+    exact_decode: Callable[[ALNSSolution], ScheduleResult],
+    exact_top_k: int,
+) -> _InsertionOption:
+    unique: list[_InsertionOption] = []
+    seen: set[tuple[object, ...]] = set()
+    for option in options:
+        key = (
+            option.trip_index,
+            option.trip.model,
+            option.trip.route.service_sequence,
+            option.trip.route.box_ids,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(option)
+        if len(unique) >= exact_top_k:
+            break
+    return min(
+        unique,
+        key=lambda option: (
+            _partial_exact_key(exact_decode(_apply_insertion(solution, option)), boxes),
+            option.score,
+        ),
+    )
+
+
 def _repair(
     operator: str,
     partial: ALNSSolution,
@@ -561,6 +719,8 @@ def _repair(
     weights: tuple[float, float, float],
     scales: tuple[float, float, float],
     rng: random.Random,
+    exact_decode: Callable[[ALNSSolution], ScheduleResult] | None = None,
+    exact_top_k: int = 0,
 ) -> ALNSSolution:
     solution = partial
     pending = list(removed)
@@ -592,6 +752,13 @@ def _repair(
             if not options:
                 raise RuntimeError(f"货箱无可行插入位置：{chosen_id}")
             chosen_option = options[0]
+        if exact_decode is not None and exact_top_k > 0:
+            options = _insertion_options(
+                chosen_id, solution, boxes, evaluator, weights, scales, operator
+            )
+            chosen_option = _choose_exact_insertion(
+                solution, options, boxes, exact_decode, exact_top_k
+            )
         solution = _apply_insertion(solution, chosen_option)
         pending.remove(chosen_id)
 
@@ -633,10 +800,19 @@ def solve_q2_alns(
     warm_start: tuple[TypedRoutePlan, ...] | None = None,
     enabled_destroy_operators: tuple[str, ...] | None = None,
     enabled_repair_operators: tuple[str, ...] | None = None,
+    profiles: tuple[tuple[str, tuple[float, float, float]], ...] | None = None,
+    objective_mode: str = "weighted",
+    enable_critical_operators: bool = False,
+    critical_operator_period: int = 0,
+    critical_exact_top_k: int = 0,
+    exact_top_k: int = 0,
 ) -> Q2ALNSResult:
     del nodes  # 节点几何已经统一封装在有向航段缓存中。
     boxes = {box.box_id: box for values in boxes_by_service.values() for box in values}
-    destroy_names = enabled_destroy_operators or DESTROY_OPERATORS
+    active_profiles = profiles or PROFILE_WEIGHTS
+    destroy_names = enabled_destroy_operators or (
+        DESTROY_OPERATORS if enable_critical_operators else BASE_DESTROY_OPERATORS
+    )
     repair_names = enabled_repair_operators or REPAIR_OPERATORS
     if not destroy_names or not repair_names:
         raise ValueError("破坏算子集和修复算子集均不能为空")
@@ -644,6 +820,12 @@ def solve_q2_alns(
         raise ValueError("启用了未知破坏算子")
     if any(name not in REPAIR_OPERATORS for name in repair_names):
         raise ValueError("启用了未知修复算子")
+    if objective_mode not in {"weighted", "time_lex"}:
+        raise ValueError(f"未知目标模式：{objective_mode}")
+    if exact_top_k < 0 or critical_exact_top_k < 0:
+        raise ValueError("Top-K参数不能为负数")
+    if critical_operator_period < 0:
+        raise ValueError("critical_operator_period不能为负数")
     evaluator = RouteEvaluator(boxes, drones, legs)
     initial_solutions, direct_solution = _initial_solutions(
         boxes_by_service, boxes, drones, evaluator, legs, units, batteries
@@ -680,14 +862,14 @@ def solve_q2_alns(
     convergence: list[ConvergenceRecord] = []
     operator_records: list[OperatorRecord] = []
 
-    for profile_index, (profile, weights) in enumerate(PROFILE_WEIGHTS):
+    for profile_index, (profile, weights) in enumerate(active_profiles):
         for seed_offset in range(seeds_per_profile):
             seed = seed_base + profile_index * 100_003 + seed_offset
             rng = random.Random(seed)
             start_clock = time.perf_counter()
             current_solution, current = min(
                 initial_schedules,
-                key=lambda item: _quality_key(item[1], weights, scales),
+                key=lambda item: _search_key(item[1], weights, scales, objective_mode),
             )
             best_solution, best = current_solution, current
             feasible_iteration = 0 if current.objective.hard_violation_count == 0 else None
@@ -717,7 +899,17 @@ def solve_q2_alns(
                     stop_reason = "连续无改进上限"
                     break
                 iteration += 1
-                destroy_name = _roulette(destroy_weights, rng)
+                if (
+                    enable_critical_operators
+                    and critical_operator_period > 0
+                    and iteration % critical_operator_period == 0
+                ):
+                    destroy_name = _roulette(
+                        {name: destroy_weights[name] for name in CRITICAL_DESTROY_OPERATORS},
+                        rng,
+                    )
+                else:
+                    destroy_name = _roulette(destroy_weights, rng)
                 repair_name = _roulette(repair_weights, rng)
                 removal_count = rng.randint(min_removal_count, max_removal_count)
                 partial, removed = _destroy(
@@ -728,6 +920,12 @@ def solve_q2_alns(
                     rng,
                     removal_count,
                 )
+                move_exact_top_k = exact_top_k
+                if (
+                    move_exact_top_k == 0
+                    and destroy_name in CRITICAL_DESTROY_OPERATORS
+                ):
+                    move_exact_top_k = critical_exact_top_k
                 candidate_solution = _repair(
                     repair_name,
                     partial,
@@ -737,19 +935,20 @@ def solve_q2_alns(
                     weights,
                     scales,
                     rng,
+                    exact_decode=decode if move_exact_top_k > 0 else None,
+                    exact_top_k=move_exact_top_k,
                 )
                 candidate = decode(candidate_solution)
-                current_key = _quality_key(current, weights, scales)
-                candidate_key = _quality_key(candidate, weights, scales)
+                current_key = _search_key(current, weights, scales, objective_mode)
+                candidate_key = _search_key(candidate, weights, scales, objective_mode)
                 accepted = False
                 reward = 0.2
                 if candidate_key < current_key:
                     accepted = True
                     reward = 4.0
                 elif candidate_key[0] == current_key[0]:
-                    delta = (
-                        (candidate_key[1] - current_key[1]) / max(scales[0], 1.0)
-                        + candidate_key[2] - current_key[2]
+                    delta = _acceptance_delta(
+                        candidate, current, weights, scales, objective_mode
                     )
                     if delta <= 0.0 or rng.random() < math.exp(-delta / max(temperature, 1e-12)):
                         accepted = True
@@ -758,7 +957,9 @@ def solve_q2_alns(
                     current_solution, current = candidate_solution, candidate
                     accepted_moves += 1
                     _archive_add(archive, current)
-                if _quality_key(candidate, weights, scales) < _quality_key(best, weights, scales):
+                if _search_key(candidate, weights, scales, objective_mode) < _search_key(
+                    best, weights, scales, objective_mode
+                ):
                     best_solution, best = candidate_solution, candidate
                     improving_moves += 1
                     no_improvement = 0
@@ -838,10 +1039,23 @@ def solve_q2_alns(
         raise RuntimeError("ALNS未获得任何零硬违约方案")
     front = pareto_filter_schedules(list(archive.values()))
     representatives = select_pareto_representatives(front)
-    best = min(
-        front,
-        key=lambda item: (normalized_ideal_distance(item, front)[0], _objective_tuple(item.objective)),
-    )
+    if objective_mode == "time_lex":
+        best = min(
+            front,
+            key=lambda item: (
+                item.objective.makespan_s,
+                item.objective.energy_kwh,
+                item.objective.trip_count,
+            ),
+        )
+    else:
+        best = min(
+            front,
+            key=lambda item: (
+                normalized_ideal_distance(item, front)[0],
+                _objective_tuple(item.objective),
+            ),
+        )
     return Q2ALNSResult(
         best,
         baseline,
@@ -857,6 +1071,8 @@ def solve_q2_alns(
 __all__ = [
     "ALNSRunRecord",
     "ConvergenceRecord",
+    "BASE_DESTROY_OPERATORS",
+    "CRITICAL_DESTROY_OPERATORS",
     "DESTROY_OPERATORS",
     "OperatorRecord",
     "PROFILE_WEIGHTS",

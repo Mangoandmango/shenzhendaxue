@@ -1,6 +1,7 @@
 """问题二路线物理量、资源时序与独立复核测试。"""
 
 import unittest
+import random
 from pathlib import Path
 import sys
 
@@ -25,9 +26,17 @@ from uav_rescue.models.q2_transport import (  # noqa: E402
     schedule_routes,
     schedule_typed_routes_event_driven,
 )
+from uav_rescue.models.q2_transport_soft import (  # noqa: E402
+    hard_deadline_s as soft_hard_deadline_s,
+)
 from uav_rescue.solvers.q2_solver import (  # noqa: E402
     pareto_filter_schedules,
     select_pareto_representatives,
+)
+from uav_rescue.solvers.q2_alns import (  # noqa: E402
+    ALNSSolution,
+    _destroy,
+    _search_key,
 )
 from uav_rescue.validation.q2 import validate_q2_solution  # noqa: E402
 
@@ -63,6 +72,12 @@ class QuestionTwoTransportTests(unittest.TestCase):
         self.assertEqual(hard_deadline_s(self.boxes["B2"]), 2000)
         first_batch = Box("B3", "S001", "饮用水", 1, 0.01, True, 900, 1200, 1)
         self.assertEqual(hard_deadline_s(first_batch), 900)
+
+    def test_soft_comparator_only_keeps_medical_and_first_batch_hard(self) -> None:
+        self.assertEqual(soft_hard_deadline_s(self.boxes["B1"]), 1000)
+        self.assertIsNone(soft_hard_deadline_s(self.boxes["B2"]))
+        first_batch = Box("B3", "S001", "饮用水", 1, 0.01, True, 900, 1200, 1)
+        self.assertEqual(soft_hard_deadline_s(first_batch), 900)
 
     def test_drone_can_reuse_after_return_with_second_full_battery(self) -> None:
         units = {"U01": TransportUnit("U01", "A", "O01")}
@@ -127,6 +142,35 @@ class QuestionTwoTransportTests(unittest.TestCase):
         self.assertEqual(representatives["能耗优先"], fast_efficient)
         self.assertEqual(representatives["最少架次优先"], fast_efficient)
         self.assertIn(representatives["综合折中"], front)
+
+    def test_time_lex_objective_prioritizes_makespan(self) -> None:
+        fast = ScheduleResult((), Objective(0, 0.0, 999, 90, 20, 4))
+        efficient = ScheduleResult((), Objective(0, 0.0, 1, 100, 5, 2))
+        weights = (0.6, 0.2, 0.2)
+        scales = (100, 20, 4)
+        self.assertLess(
+            _search_key(fast, weights, scales, "time_lex"),
+            _search_key(efficient, weights, scales, "time_lex"),
+        )
+
+    def test_critical_last_trip_destroy_removes_makespan_trip(self) -> None:
+        units = {"U01": TransportUnit("U01", "A", "O01")}
+        batteries = {
+            "A-BAT-01": TransportBattery("A-BAT-01", "A", 1000),
+            "A-BAT-02": TransportBattery("A-BAT-02", "A", 1000),
+        }
+        plans = (
+            TypedRoutePlan(RoutePlan(("B1",), ("S001",)), "A"),
+            TypedRoutePlan(RoutePlan(("B2",), ("S002",)), "A"),
+        )
+        schedule = schedule_typed_routes_event_driven(
+            plans, self.evaluator, self.boxes, units, batteries
+        )
+        _, removed = _destroy(
+            "critical_last_trip", ALNSSolution(plans), schedule,
+            self.boxes, random.Random(1), 1,
+        )
+        self.assertEqual(removed, ("B2",))
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ from uav_rescue.models.q2_transport import (
 )
 from uav_rescue.settings import load_toml, project_path
 from uav_rescue.solvers.q2_alns import (
-    DESTROY_OPERATORS,
+    BASE_DESTROY_OPERATORS,
     PROFILE_WEIGHTS,
     Q2ALNSResult,
     REPAIR_OPERATORS,
@@ -291,7 +291,7 @@ def run(
             ("关闭自适应权重", {"reaction_factor": 0.0}),
             ("关闭资源瓶颈破坏", {
                 "enabled_destroy_operators": tuple(
-                    name for name in DESTROY_OPERATORS if name != "resource_bottleneck"
+                    name for name in BASE_DESTROY_OPERATORS if name != "resource_bottleneck"
                 )
             }),
             ("关闭regret插入", {

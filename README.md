@@ -18,7 +18,9 @@ python scripts/prepare_data.py
 python scripts/run_q1.py
 python scripts/run_q1_sensitivity.py
 python scripts/run_q2.py
+python scripts/run_q2_soft.py
 python scripts/run_q2b.py
+python scripts/run_q2b_time.py
 python -m unittest discover -s tests -v
 ```
 
@@ -28,6 +30,9 @@ python -m unittest discover -s tests -v
 python -m pip install -e .
 huawei-q1
 huawei-q2
+huawei-q2-soft
+huawei-q2b
+huawei-q2b-time
 ```
 
 ## 数据纪律
@@ -56,3 +61,7 @@ huawei-q2
 电池占用区间从架次开始延续到返航后充至 100%，无人机则在返航后可换用另一组同型号满电电池。输出包括提交模板所需运输架次和逐箱交付表、无人机与电池时序、逐航段载荷、独立复核、多起点稳定性、Pareto 前沿与代表方案，以及使用相同资源和物理口径的单点直投基线。
 
 方案 B 使用 `python scripts/run_q2b.py` 独立运行，不覆盖方案 A 结果。它以方案 A 的已复核方案热启动，用有序架次、机型和货箱集合作为 ALNS 编码，通过 7 类破坏算子、6 类修复算子、自适应权重和模拟退火接受准则搜索；每个候选解由事件驱动解码器联合分配实体无人机、共享电池和开始时刻。配置位于 `configs/q2b.toml`，结果位于 `outputs/q2b/`，包括多种子统计、收敛记录、算子权重、消融实验、Pareto 方案和独立复核。
+
+`python scripts/run_q2_soft.py` 是普通物资软时间窗对照实验，不是问题二最终约束口径。该实验仅将医疗物资期望送达时间和首批保障截止时间设为硬约束；普通物资期望送达时间按“应急优先系数 × 正迟到时间”进入及时性目标。代码、配置和结果分别隔离在 `q2_*_soft.py`、`configs/q2_soft.toml` 和 `outputs/q2_soft/`，用于与最终采用的全货箱硬时间窗方案比较。
+
+完工时间强化版使用 `python scripts/run_q2b_time.py`，按 B0 加权目标基线、B1 字典序完工目标、B2 关键无人机/电池资源链邻域、B3 全局 Top-K 事件驱动精确复算逐步启用模块。四组共享实例、热启动、随机种子和搜索预算；结果写入 `outputs/q2b_time/`，包括跨种子均值/标准差、计算代价、消融图和B3最终方案的完整资源可行性复核。

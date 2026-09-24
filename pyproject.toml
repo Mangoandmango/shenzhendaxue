@@ -16,7 +16,9 @@ dependencies = [
 [project.scripts]
 huawei-q1 = "uav_rescue.cli.q1:main"
 huawei-q2 = "uav_rescue.cli.q2:main"
+huawei-q2-soft = "uav_rescue.cli.q2_soft:main"
 huawei-q2b = "uav_rescue.cli.q2b:main"
+huawei-q2b-time = "uav_rescue.cli.q2b_time:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

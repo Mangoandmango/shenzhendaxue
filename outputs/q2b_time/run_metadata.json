@@ -1,0 +1,89 @@
+{
+  "configuration": {
+    "cooling_rate": 0.997,
+    "exact_top_k": 3,
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 600,
+    "max_removal_count": 8,
+    "min_removal_count": 2,
+    "profiles": [
+      [
+        "均衡消融",
+        [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      ]
+    ],
+    "reaction_factor": 0.2,
+    "seed_base": 20260924,
+    "seeds_per_profile": 10,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 120.0,
+    "update_period": 50,
+    "warm_start": true
+  },
+  "experiment": "方案B完工时间强化版逐步消融",
+  "fairness": "B0--B3使用相同实例、初始解、随机种子、迭代上限与停止规则",
+  "final_objective": {
+    "energy_kwh": 71.35170142639014,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 6504.819467083989,
+    "trip_count": 23,
+    "weighted_soft_tardiness": 0.0
+  },
+  "final_variant": "B3 +Top-K精确复算",
+  "variants": {
+    "B0 加权目标基线": {
+      "all_checks_passed": true,
+      "best_objective": {
+        "energy_kwh": 65.3946635925066,
+        "hard_tardiness_s": 0.0,
+        "hard_violation_count": 0,
+        "makespan_s": 7929.84983297731,
+        "trip_count": 20,
+        "weighted_soft_tardiness": 0.0
+      },
+      "run_count": 10
+    },
+    "B1 +字典序完工目标": {
+      "all_checks_passed": true,
+      "best_objective": {
+        "energy_kwh": 65.363621890608,
+        "hard_tardiness_s": 0.0,
+        "hard_violation_count": 0,
+        "makespan_s": 7929.84983297731,
+        "trip_count": 21,
+        "weighted_soft_tardiness": 0.0
+      },
+      "run_count": 10
+    },
+    "B2 +关键资源链邻域": {
+      "all_checks_passed": true,
+      "best_objective": {
+        "energy_kwh": 74.02359606878905,
+        "hard_tardiness_s": 0.0,
+        "hard_violation_count": 0,
+        "makespan_s": 6697.349339072649,
+        "trip_count": 24,
+        "weighted_soft_tardiness": 0.0
+      },
+      "run_count": 10
+    },
+    "B3 +Top-K精确复算": {
+      "all_checks_passed": true,
+      "best_objective": {
+        "energy_kwh": 71.35170142639014,
+        "hard_tardiness_s": 0.0,
+        "hard_violation_count": 0,
+        "makespan_s": 6504.819467083989,
+        "trip_count": 23,
+        "weighted_soft_tardiness": 0.0
+      },
+      "run_count": 10
+    }
+  }
+}

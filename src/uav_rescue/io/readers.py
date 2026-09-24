@@ -6,7 +6,14 @@ from pathlib import Path
 
 import openpyxl
 
-from uav_rescue.domain import Box, Node, TransportDrone
+from uav_rescue.domain import (
+    Box,
+    LegGeometry,
+    Node,
+    TransportBattery,
+    TransportDrone,
+    TransportUnit,
+)
 
 
 def read_nonempty_excel_rows(path: Path, sheet: str = "数据") -> list[tuple]:
@@ -73,4 +80,69 @@ def load_transport_drones(path: Path, reserve_override: float | None = None) -> 
             climb_speed_mps=float(row[14]), descent_speed_mps=float(row[15]),
             climb_efficiency=float(row[16]),
         )
+    return result
+
+
+def load_transport_resources(path: Path) -> tuple[dict[str, TransportUnit], dict[str, TransportBattery]]:
+    """读取实体运输无人机与共享电池，并给电池生成稳定编号。"""
+
+    rows = read_nonempty_excel_rows(path)
+    units: dict[str, TransportUnit] = {}
+    batteries: dict[str, TransportBattery] = {}
+    in_units = False
+    for row in rows:
+        first = row[0]
+        if first == "无人机编号":
+            in_units = True
+            continue
+        if in_units:
+            if isinstance(first, str) and first.startswith("U"):
+                units[str(first)] = TransportUnit(str(first), str(row[1]), str(row[2]))
+                continue
+            in_units = False
+        if first in {"A", "B", "C"} and len(row) >= 3 and row[1] is not None and row[2] is not None:
+            if isinstance(row[1], (int, float)) and isinstance(row[2], (int, float)):
+                model = str(first)
+                count = int(row[1])
+                full_charge_time_s = float(row[2])
+                for index in range(1, count + 1):
+                    battery_id = f"{model}-BAT-{index:02d}"
+                    batteries[battery_id] = TransportBattery(
+                        battery_id, model, full_charge_time_s
+                    )
+    if not units or not batteries:
+        raise ValueError("运输无人机附件中未能完整读取实体机或共享电池库存")
+    return units, batteries
+
+
+def load_leg_geometry_cache(
+    path: Path,
+    nodes: dict[str, Node],
+    service_operation_height_m: float = 30.0,
+) -> dict[tuple[str, str], LegGeometry]:
+    """从公共缓存恢复有向航段几何及相对起降高度。"""
+
+    result: dict[tuple[str, str], LegGeometry] = {}
+    for row in read_csv_rows(path):
+        origin = row["origin_id"]
+        destination = row["destination_id"]
+        cruise_altitude = float(row["cruise_altitude_m"])
+        origin_altitude = nodes[origin].ground_m + (
+            0.0 if origin == "O01" else service_operation_height_m
+        )
+        destination_altitude = nodes[destination].ground_m + (
+            0.0 if destination == "O01" else service_operation_height_m
+        )
+        result[(origin, destination)] = LegGeometry(
+            origin,
+            destination,
+            float(row["horizontal_distance_m"]),
+            cruise_altitude,
+            max(0.0, cruise_altitude - origin_altitude),
+            max(0.0, cruise_altitude - destination_altitude),
+            int(row["traversed_dem_cell_count"]),
+        )
+    expected = len(nodes) * (len(nodes) - 1)
+    if len(result) != expected:
+        raise ValueError(f"航段缓存应含 {expected} 条有向航段，实际为 {len(result)}")
     return result

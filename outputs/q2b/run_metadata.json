@@ -1,0 +1,101 @@
+{
+  "ablation": {
+    "关闭regret插入": {
+      "energy_kwh": 64.80986437747752,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 9048.155608825611,
+      "trip_count": 19,
+      "weighted_soft_tardiness": 0.0
+    },
+    "关闭自适应权重": {
+      "energy_kwh": 64.49153134022805,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 7933.458759999992,
+      "trip_count": 20,
+      "weighted_soft_tardiness": 0.0
+    },
+    "关闭资源瓶颈破坏": {
+      "energy_kwh": 63.92004623712173,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 7994.499226378144,
+      "trip_count": 19,
+      "weighted_soft_tardiness": 0.0
+    }
+  },
+  "algorithm": "ALNS + event-driven joint drone-battery scheduling",
+  "all_representatives_passed": true,
+  "baseline_objective": {
+    "energy_kwh": 67.78391008016699,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 9883.942422912529,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  },
+  "best_objective": {
+    "energy_kwh": 63.5223945121432,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 8334.029392485472,
+    "trip_count": 19,
+    "weighted_soft_tardiness": 0.0
+  },
+  "checks": {
+    "通过": 466
+  },
+  "configuration": {
+    "cooling_rate": 0.997,
+    "description": "方案B：带机型架次编码的ALNS与事件驱动无人机-电池联合排程；所有货箱期望送达时间均为硬时间窗。",
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 1200,
+    "max_removal_count": 8,
+    "min_removal_count": 2,
+    "reaction_factor": 0.2,
+    "seed_base": 20260901,
+    "seeds_per_profile": 8,
+    "stall_iterations": 350,
+    "status": "implemented",
+    "time_limit_per_run_s": 90.0,
+    "update_period": 50
+  },
+  "deadline_policy": "所有货箱期望送达时间均为硬时间窗；首批取期望与首批截止的较早值",
+  "greedy_initial_objective": {
+    "energy_kwh": 67.799264718126,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 8334.029392485472,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  },
+  "pareto_count": 5,
+  "profile_weights": {
+    "均衡": [
+      0.3333333333333333,
+      0.3333333333333333,
+      0.3333333333333333
+    ],
+    "完工时间优先": [
+      0.6,
+      0.2,
+      0.2
+    ],
+    "资源节约": [
+      0.2,
+      0.45,
+      0.35
+    ]
+  },
+  "run_count": 24,
+  "scheme_a_objective": {
+    "energy_kwh": 67.799264718126,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 8334.029392485472,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  }
+}

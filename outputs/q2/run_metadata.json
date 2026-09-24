@@ -1,0 +1,76 @@
+{
+  "all_representatives_passed": true,
+  "baseline_objective": {
+    "energy_kwh": 67.78391008016699,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 9883.942422912529,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  },
+  "best_objective": {
+    "energy_kwh": 67.799264718126,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 8334.029392485472,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  },
+  "checks": {
+    "通过": 491
+  },
+  "configuration": {
+    "battery_occupancy": "架次开始至返航后充至100%",
+    "drone_occupancy": "架次开始至返航完成",
+    "max_iterations": 5000,
+    "random_seed_count": 20,
+    "repair_limit": 30,
+    "seed_base": 20260901,
+    "stall_iterations": 800,
+    "time_limit_per_seed_s": 60.0
+  },
+  "pareto_count": 13,
+  "pareto_representatives": {
+    "及时性优先": {
+      "energy_kwh": 70.05967376091161,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 8047.103175797063,
+      "trip_count": 27,
+      "weighted_soft_tardiness": 0.0
+    },
+    "完工时间优先": {
+      "energy_kwh": 70.05967376091161,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 8047.103175797063,
+      "trip_count": 27,
+      "weighted_soft_tardiness": 0.0
+    },
+    "最少架次优先": {
+      "energy_kwh": 69.14756859371344,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 10223.238655632933,
+      "trip_count": 20,
+      "weighted_soft_tardiness": 0.0
+    },
+    "综合折中": {
+      "energy_kwh": 67.799264718126,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 8334.029392485472,
+      "trip_count": 21,
+      "weighted_soft_tardiness": 0.0
+    },
+    "能耗优先": {
+      "energy_kwh": 64.86850088194896,
+      "hard_tardiness_s": 0.0,
+      "hard_violation_count": 0,
+      "makespan_s": 8922.066494225412,
+      "trip_count": 24,
+      "weighted_soft_tardiness": 0.0
+    }
+  },
+  "selection_rule": "所有期望送达时间为硬约束；零违约Pareto前沿上完工时间、能耗和架次的min-max归一化等权理想点距离最小"
+}

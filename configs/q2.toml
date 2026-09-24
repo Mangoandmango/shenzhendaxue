@@ -1,4 +1,15 @@
 [optimization]
-status = "pending"
-description = "异构无人机多点多架次运输调度，复用公共航段与能耗模块。"
+status = "implemented"
+description = "增强型方案A：所有物资期望送达时间均作为硬时间窗；多起点服务区序列、动态规划切分、资源列表调度与冲突修复；多偏好搜索构造Pareto前沿，用归一化理想点距离选综合折中解。"
+seed_base = 20260901
+random_seed_count = 20
+max_iterations = 5000
+stall_iterations = 800
+time_limit_per_seed_s = 60.0
+repair_limit = 30
 
+[output]
+directory = "outputs/q2"
+
+[cache]
+leg_geometry = "data/cache/leg_geometry.csv"

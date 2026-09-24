@@ -76,3 +76,21 @@ class LegSimulation:
     equivalent_range_m: float
     flight_time_s: float
     energy_kwh: float
+
+
+@dataclass(frozen=True)
+class TransportUnit:
+    """一架可独立排程的实体运输无人机。"""
+
+    unit_id: str
+    model: str
+    initial_location: str
+
+
+@dataclass(frozen=True)
+class TransportBattery:
+    """一组带机型兼容关系和充电时间的共享电池。"""
+
+    battery_id: str
+    model: str
+    full_charge_time_s: float

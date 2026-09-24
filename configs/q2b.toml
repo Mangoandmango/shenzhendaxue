@@ -1,0 +1,28 @@
+[optimization]
+status = "implemented"
+description = "方案B：带机型架次编码的ALNS与事件驱动无人机-电池联合排程；所有货箱期望送达时间均为硬时间窗。"
+seed_base = 20260901
+seeds_per_profile = 8
+max_iterations = 1200
+stall_iterations = 350
+time_limit_per_run_s = 90.0
+min_removal_count = 2
+max_removal_count = 8
+reaction_factor = 0.20
+update_period = 50
+initial_temperature = 0.05
+cooling_rate = 0.997
+log_period = 20
+
+[ablation]
+enabled = true
+seeds_per_profile = 2
+max_iterations = 400
+stall_iterations = 150
+time_limit_per_run_s = 30.0
+
+[output]
+directory = "outputs/q2b"
+
+[cache]
+leg_geometry = "data/cache/leg_geometry.csv"

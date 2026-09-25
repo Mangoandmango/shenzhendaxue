@@ -100,6 +100,8 @@ class RelayColumn:
     column_id: str
     site: RelaySite
     covered_interval_ids: tuple[str, ...]
+    max_concurrent_transports: int
+    covered_sample_count: int
     service_start_s: float
     service_end_s: float
     mission_start_s: float

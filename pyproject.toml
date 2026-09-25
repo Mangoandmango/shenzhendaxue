@@ -11,6 +11,7 @@ dependencies = [
   "matplotlib>=3.8",
   "openpyxl>=3.1",
   "Pillow>=10.0",
+  "scipy>=1.13",
 ]
 
 [project.scripts]
@@ -19,6 +20,9 @@ huawei-q2 = "uav_rescue.cli.q2:main"
 huawei-q2-soft = "uav_rescue.cli.q2_soft:main"
 huawei-q2b = "uav_rescue.cli.q2b:main"
 huawei-q2b-time = "uav_rescue.cli.q2b_time:main"
+huawei-q3 = "uav_rescue.cli.q3:main"
+huawei-q2b-soft = "uav_rescue.cli.q2b_soft:main"
+huawei-q2b-joint = "uav_rescue.cli.q2b_joint:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

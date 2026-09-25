@@ -1,0 +1,29 @@
+[optimization]
+description = "强化版B+-H：恢复B3强ALNS外层 + Top-K事件驱动筛选 + MILP联合资源复排；普通物资期望送达时间为硬时间窗。"
+seed_base = 20260924
+seeds_per_profile = 10
+max_iterations = 600
+stall_iterations = 300
+time_limit_per_run_s = 120.0
+min_removal_count = 2
+max_removal_count = 8
+reaction_factor = 0.20
+update_period = 50
+initial_temperature = 0.05
+cooling_rate = 0.997
+log_period = 20
+exact_top_k = 3
+initial_candidate_limit = 8
+feedback_rounds = 1
+candidates_per_round = 6
+milp_time_limit_per_stage_s = 30.0
+milp_rel_gap = 0.0001
+
+[warm_start]
+legacy_b3_output = "outputs/q2b_time"
+
+[output]
+directory = "outputs/q2b_joint_hard"
+
+[cache]
+leg_geometry = "data/cache/leg_geometry.csv"

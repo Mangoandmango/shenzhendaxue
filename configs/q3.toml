@@ -1,6 +1,18 @@
 [communication]
-status = "pending"
 trajectory_time_step_s = 5
 verification_time_step_s = 1
-description = "联合调度模型确定后填写中继候选位置与求解参数。"
+terrain_clearance_m = 0.0
+blind_service_chunk_s = 300.0
 
+[baseline]
+transport_schedule = "outputs/q2/pareto/完工时间优先/运输架次.csv"
+transport_deliveries = "outputs/q2/pareto/完工时间优先/逐箱交付.csv"
+candidate_grid_step_m = 500.0
+candidate_height_levels_m = [100.0, 200.0, 300.0]
+candidate_ray_fractions = [0.25, 0.5, 0.75]
+candidate_neighbor_radius = 1
+max_candidates_per_blind_interval = 200
+max_gap_steps_in_interval = 1
+objective = "lexicographic_sorties_energy_margin"
+relay_concurrent_transport_limit = 0
+enable_feedback = false

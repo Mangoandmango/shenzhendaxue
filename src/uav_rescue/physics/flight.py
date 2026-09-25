@@ -1,13 +1,14 @@
 """航段几何、飞行时间与统一航段物理接口。"""
 
 from uav_rescue.domain import LegGeometry, LegSimulation, Node, TransportDrone
-from uav_rescue.geo.coordinates import haversine_m
+from uav_rescue.geo.coordinates import LocalEnu
 from uav_rescue.geo.dem import DemGrid
 from uav_rescue.physics.energy import equivalent_range_m, leg_energy_kwh
 
 
 def build_leg(
     dem: DemGrid,
+    enu: LocalEnu,
     origin: Node,
     destination: Node,
     origin_operation_altitude_m: float,
@@ -16,16 +17,17 @@ def build_leg(
 ) -> LegGeometry:
     """按沿线最高 DEM 高程加净空构造一个航段。"""
 
-    cells = dem.traversed_cells(origin.lon, origin.lat, destination.lon, destination.lat)
-    cruise_altitude = max(dem.elevations(cells)) + clearance_m
+    distance, records = dem.trace_enu_segment(enu, origin.lon, origin.lat, destination.lon, destination.lat)
+    traversed = dem.positive_intersections(records)
+    cruise_altitude = max(record.elevation_m for record in traversed) + clearance_m
     return LegGeometry(
         origin.node_id,
         destination.node_id,
-        haversine_m(origin, destination),
+        distance,
         cruise_altitude,
         max(0.0, cruise_altitude - origin_operation_altitude_m),
         max(0.0, cruise_altitude - destination_operation_altitude_m),
-        len(cells),
+        len({(record.row, record.col) for record in traversed}),
     )
 
 
@@ -64,6 +66,7 @@ def simulate_leg_from_geometry(
 
 def simulate_leg(
     dem: DemGrid,
+    enu: LocalEnu,
     drone: TransportDrone,
     origin: Node,
     destination: Node,
@@ -75,7 +78,7 @@ def simulate_leg(
     """从节点与 DEM 构造航段后调用统一接口，适合没有预建缓存的场景。"""
 
     leg = build_leg(
-        dem, origin, destination, origin_operation_altitude_m,
+        dem, enu, origin, destination, origin_operation_altitude_m,
         destination_operation_altitude_m, clearance_m,
     )
     return simulate_leg_from_geometry(drone, leg, payload_kg)

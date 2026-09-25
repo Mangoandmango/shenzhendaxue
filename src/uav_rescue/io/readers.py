@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 import csv
+import json
 from pathlib import Path
 
 import openpyxl
@@ -28,6 +29,20 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
 
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+ENU_GEOMETRY_DEFINITION = "O01_WGS84_ENU_SUPERCOVER_V2"
+
+
+def assert_enu_geometry_cache(cache_directory: Path) -> None:
+    """拒绝迁移前的航段缓存，避免新代码误用旧球面距离结果。"""
+
+    metadata_path = cache_directory / "geometry_metadata.json"
+    if not metadata_path.exists():
+        raise ValueError("航段缓存缺少 ENU 几何元数据；请先运行 scripts/prepare_data.py 重建缓存")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("geometry_definition") != ENU_GEOMETRY_DEFINITION:
+        raise ValueError("航段缓存不是当前 ENU 几何版本；请先运行 scripts/prepare_data.py 重建缓存")
 
 
 def load_nodes(path: Path) -> dict[str, Node]:
@@ -122,6 +137,7 @@ def load_leg_geometry_cache(
 ) -> dict[tuple[str, str], LegGeometry]:
     """从公共缓存恢复有向航段几何及相对起降高度。"""
 
+    assert_enu_geometry_cache(path.parent)
     result: dict[tuple[str, str], LegGeometry] = {}
     for row in read_csv_rows(path):
         origin = row["origin_id"]

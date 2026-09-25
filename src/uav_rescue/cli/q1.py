@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from uav_rescue.geo.dem import DemGrid
+from uav_rescue.geo.coordinates import LocalEnu
 from uav_rescue.io.readers import load_boxes, load_nodes, load_transport_drones
 from uav_rescue.io.writers import write_csv
 from uav_rescue.models.q1_batching import (
@@ -47,6 +48,7 @@ def run(
     output_root = output_directory or project_path(q1["output"]["directory"])
     table_dir, figure_dir = output_root / "tables", output_root / "figures"
     origin = nodes["O01"]
+    enu = LocalEnu(origin.lon, origin.lat, 0.0)
 
     geometry_rows: list[list[object]] = []
     safe_rows_csv: list[list[object]] = []
@@ -56,12 +58,12 @@ def run(
     for service_id in sorted(boxes_by_service):
         service = nodes[service_id]
         outbound = build_leg(
-            dem, origin, service, origin.ground_m,
+            dem, enu, origin, service, origin.ground_m,
             service.ground_m + physics["service_operation_height_m"],
             physics["terrain_clearance_m"],
         )
         inbound = build_leg(
-            dem, service, origin,
+            dem, enu, service, origin,
             service.ground_m + physics["service_operation_height_m"], origin.ground_m,
             physics["terrain_clearance_m"],
         )
@@ -149,8 +151,8 @@ def run(
 
     validation_records = validate_q1_solution(boxes_by_service, drones, solutions, legs)
     write_csv(table_dir / "航段几何.csv", [
-        "服务区", "单程水平距离_m", "沿线最高地形_m", "巡航海拔_m", "去程爬升_m", "去程下降_m",
-        "返程爬升_m", "返程下降_m", "穿越DEM像元数"], geometry_rows)
+        "服务区", "ENU水平距离_m", "沿线最高地形_m", "巡航海拔_m", "去程爬升_m", "去程下降_m",
+        "返程爬升_m", "返程下降_m", "DEM采样像元数"], geometry_rows)
     write_csv(table_dir / "最大安全载荷.csv", [
         "服务区", "机型", "最大安全载荷_kg", "额定载荷_kg", "可用体积_m3",
         "空载往返能耗_kWh", "边界载荷往返能耗_kWh", "允许能耗上限_kWh", "安全载荷受限原因",

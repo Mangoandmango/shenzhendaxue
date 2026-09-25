@@ -30,6 +30,15 @@ class CoordinateTests(unittest.TestCase):
         self.assertGreater(east, 0.0)
         self.assertGreater(north, 0.0)
 
+    def test_enu_straight_path_round_trips_to_endpoints(self) -> None:
+        enu = LocalEnu(109.0, 23.0, 0.0)
+        distance, points = enu.straight_path_lonlat(109.0, 23.0, 109.001, 23.001, max_step_m=5.0)
+        self.assertGreater(distance, 0.0)
+        self.assertAlmostEqual(points[0][0], 109.0, places=8)
+        self.assertAlmostEqual(points[0][1], 23.0, places=8)
+        self.assertAlmostEqual(points[-1][0], 109.001, places=8)
+        self.assertAlmostEqual(points[-1][1], 23.001, places=8)
+
 
 if __name__ == "__main__":
     unittest.main()

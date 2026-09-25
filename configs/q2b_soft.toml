@@ -1,0 +1,14 @@
+[optimization]
+description = "方案B混合时间窗版：医疗期望与首批截止为硬约束，其他货箱期望时间按优先系数加权迟到进入及时性目标。"
+seed_base = 20260924
+seeds_per_profile = 4
+max_iterations = 800
+stall_iterations = 300
+time_limit_per_run_s = 90.0
+top_k = 3
+
+[output]
+directory = "outputs/q2b_soft"
+
+[cache]
+leg_geometry = "data/cache/leg_geometry.csv"

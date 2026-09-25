@@ -1,11 +1,8 @@
-"""WGS84 经纬度计算与本地 ENU 米制坐标转换。"""
+"""以 O01 为原点的 WGS84 局部 ENU 航段几何。"""
 
 import math
 
-from uav_rescue.domain import Node
-
-
-# WGS84 椭球参数；采用 ENU 而非随意投影，避免改变原始 DEM 的经纬度配准。
+# WGS84 椭球参数；所有影响模型的水平路径均在此局部 ENU 平面定义。
 WGS84_SEMI_MAJOR_M = 6_378_137.0
 WGS84_FLATTENING = 1 / 298.257_223_563
 WGS84_ECCENTRICITY_SQUARED = WGS84_FLATTENING * (2 - WGS84_FLATTENING)
@@ -21,6 +18,20 @@ def geodetic_to_ecef_m(lon_deg: float, lat_deg: float, height_m: float) -> tuple
     y = (radius + height_m) * math.cos(lat) * math.sin(lon)
     z = (radius * (1 - WGS84_ECCENTRICITY_SQUARED) + height_m) * math.sin(lat)
     return x, y, z
+
+
+def ecef_to_geodetic_m(x: float, y: float, z: float) -> tuple[float, float, float]:
+    """把 WGS84 ECEF 坐标反算为经度、纬度和椭球高。"""
+
+    lon = math.atan2(y, x)
+    horizontal = math.hypot(x, y)
+    lat = math.atan2(z, horizontal * (1 - WGS84_ECCENTRICITY_SQUARED))
+    height = 0.0
+    for _ in range(10):
+        radius = WGS84_SEMI_MAJOR_M / math.sqrt(1 - WGS84_ECCENTRICITY_SQUARED * math.sin(lat) ** 2)
+        height = horizontal / math.cos(lat) - radius
+        lat = math.atan2(z, horizontal * (1 - WGS84_ECCENTRICITY_SQUARED * radius / (radius + height)))
+    return math.degrees(lon), math.degrees(lat), height
 
 
 class LocalEnu:
@@ -52,12 +63,45 @@ class LocalEnu:
         )
         return east, north, up
 
+    def to_geodetic_m(self, east_m: float, north_m: float, up_m: float = 0.0) -> tuple[float, float, float]:
+        """将 ENU 坐标反算到 WGS84；用于把同一条 ENU 直线映射回 DEM。"""
 
-def haversine_m(a: Node, b: Node, earth_radius_m: float = 6_371_008.8) -> float:
-    """计算两个节点间的大圆水平距离，单位为 m。"""
+        dx = (-math.sin(self._lon) * east_m - math.sin(self._lat) * math.cos(self._lon) * north_m
+              + math.cos(self._lat) * math.cos(self._lon) * up_m)
+        dy = (math.cos(self._lon) * east_m - math.sin(self._lat) * math.sin(self._lon) * north_m
+              + math.cos(self._lat) * math.sin(self._lon) * up_m)
+        dz = math.cos(self._lat) * north_m + math.sin(self._lat) * up_m
+        return ecef_to_geodetic_m(self._origin_ecef[0] + dx, self._origin_ecef[1] + dy, self._origin_ecef[2] + dz)
 
-    phi1, phi2 = math.radians(a.lat), math.radians(b.lat)
-    dphi = phi2 - phi1
-    dlambda = math.radians(b.lon - a.lon)
-    value = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * earth_radius_m * math.asin(math.sqrt(value))
+    def horizontal_distance_m(self, lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+        """唯一的水平距离口径：两点在本地 ENU 平面上的欧氏距离。"""
+
+        east1, north1, _ = self.from_geodetic_m(lon1, lat1, 0.0)
+        east2, north2, _ = self.from_geodetic_m(lon2, lat2, 0.0)
+        return math.hypot(east2 - east1, north2 - north1)
+
+    def straight_path_lonlat(self, lon1: float, lat1: float, lon2: float, lat2: float,
+                             max_step_m: float = 0.25) -> tuple[float, list[tuple[float, float]]]:
+        """在 ENU 平面定义直线，并返回长度及反算至经纬度的密集 DEM 采样点。"""
+
+        if max_step_m <= 0:
+            raise ValueError("DEM 采样步长必须为正")
+        east1, north1, _ = self.from_geodetic_m(lon1, lat1, 0.0)
+        east2, north2, _ = self.from_geodetic_m(lon2, lat2, 0.0)
+        distance = math.hypot(east2 - east1, north2 - north1)
+        steps = max(1, math.ceil(distance / max_step_m))
+        points = [self.to_geodetic_m(east1 + (east2 - east1) * index / steps,
+                                     north1 + (north2 - north1) * index / steps)[:2]
+                  for index in range(steps + 1)]
+        return distance, points
+
+    def interpolate_lonlat(self, lon1: float, lat1: float, lon2: float, lat2: float,
+                           fraction: float) -> tuple[float, float]:
+        """返回 ENU 直线上指定比例位置，而非经纬度空间的线性插值。"""
+
+        ratio = min(1.0, max(0.0, fraction))
+        east1, north1, _ = self.from_geodetic_m(lon1, lat1, 0.0)
+        east2, north2, _ = self.from_geodetic_m(lon2, lat2, 0.0)
+        lon, lat, _ = self.to_geodetic_m(east1 + (east2 - east1) * ratio,
+                                         north1 + (north2 - north1) * ratio)
+        return lon, lat

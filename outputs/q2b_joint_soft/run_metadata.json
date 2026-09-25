@@ -1,0 +1,114 @@
+{
+  "additional_route_sources": [
+    "/Users/ada/Documents/ChatGPT/huawei_cup_modeling/huawei_project/outputs/q2b_time"
+  ],
+  "algorithm": "B3 ALNS transport search + Top-K event-driven screening + continuous-time MILP resource scheduling + critical-resource feedback",
+  "checks": {
+    "通过": 481
+  },
+  "configuration": {
+    "candidates_per_round": 6,
+    "cooling_rate": 0.997,
+    "description": "强化版B+-S：恢复B3强ALNS外层 + Top-K事件驱动筛选 + MILP联合资源复排；普通物资期望送达时间为软时间窗。",
+    "exact_top_k": 3,
+    "feedback_rounds": 1,
+    "initial_candidate_limit": 8,
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 600,
+    "max_removal_count": 8,
+    "milp_rel_gap": 0.0001,
+    "milp_time_limit_per_stage_s": 30.0,
+    "min_removal_count": 2,
+    "reaction_factor": 0.2,
+    "seed_base": 20260924,
+    "seeds_per_profile": 10,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 120.0,
+    "update_period": 50
+  },
+  "deadline_policy": "ordinary_soft",
+  "effective_configuration": {
+    "candidates_per_round": 6,
+    "cooling_rate": 0.997,
+    "exact_top_k": 3,
+    "feedback_rounds": 1,
+    "initial_candidate_limit": 8,
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 600,
+    "max_removal_count": 8,
+    "milp_rel_gap": 0.0001,
+    "milp_time_limit_per_stage_s": 30.0,
+    "min_removal_count": 2,
+    "reaction_factor": 0.2,
+    "seed_base": 20260924,
+    "seeds_per_profile": 10,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 120.0,
+    "update_period": 50
+  },
+  "evaluated_route_sets": 12,
+  "joint_best_objective": {
+    "energy_kwh": 71.15747207489005,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 6421.0185464447295,
+    "trip_count": 24,
+    "weighted_soft_tardiness": 0.0
+  },
+  "milp_all_stages_optimal": false,
+  "milp_backend": "gurobi",
+  "milp_stages": [
+    {
+      "dual_bound": 0.0,
+      "mip_gap": 0.0,
+      "objective": "hard_violation_count",
+      "status": "CONSTANT",
+      "value": 0.0,
+      "wall_time_s": 0.0
+    },
+    {
+      "dual_bound": 0.0,
+      "mip_gap": 0.0,
+      "objective": "hard_tardiness_s",
+      "status": "CONSTANT",
+      "value": 0.0,
+      "wall_time_s": 0.0
+    },
+    {
+      "dual_bound": 0.0,
+      "mip_gap": 0.0,
+      "objective": "weighted_soft_tardiness",
+      "status": "OPTIMAL",
+      "value": 0.0,
+      "wall_time_s": 0.28919470799155533
+    },
+    {
+      "dual_bound": 6387.4621927406,
+      "mip_gap": 0.005225022478795449,
+      "objective": "makespan_s",
+      "status": "FEASIBLE_LIMIT",
+      "value": 6421.012125432603,
+      "wall_time_s": 30.2719509590097
+    },
+    {
+      "dual_bound": 69.2316457518283,
+      "mip_gap": 0.02706428807694185,
+      "objective": "energy_kwh",
+      "status": "FEASIBLE_LIMIT",
+      "value": 71.15747207489005,
+      "wall_time_s": 30.1387020409893
+    }
+  ],
+  "outer_best_objective": {
+    "energy_kwh": 74.07926176045706,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 6535.4742246290525,
+    "trip_count": 24,
+    "weighted_soft_tardiness": 0.0
+  },
+  "outer_search_deadline_policy": "all_hard shared candidate pool",
+  "outer_search_implementation": "solve_q2_alns (B3 strong skeleton)"
+}

@@ -29,6 +29,8 @@ from uav_rescue.models.q2_transport import (  # noqa: E402
 from uav_rescue.models.q2_transport_soft import (  # noqa: E402
     hard_deadline_s as soft_hard_deadline_s,
 )
+from uav_rescue.models.q2_joint import DeadlinePolicy  # noqa: E402
+from uav_rescue.solvers.q2_milp_scheduler import schedule_routes_milp  # noqa: E402
 from uav_rescue.solvers.q2_solver import (  # noqa: E402
     pareto_filter_schedules,
     select_pareto_representatives,
@@ -122,6 +124,77 @@ class QuestionTwoTransportTests(unittest.TestCase):
             schedule, self.boxes, self.drones, units, batteries, self.evaluator
         )
         self.assertTrue(all(row.passed for row in checks))
+
+    def test_milp_scheduler_jointly_orders_routes_and_assigns_resources(self) -> None:
+        urgent_boxes = {
+            "B1": Box("B1", "S001", "医疗物资", 4, 0.1, False, None, 1000, 10),
+            "B2": Box("B2", "S002", "医疗物资", 3, 0.1, False, None, 20, 20),
+        }
+        evaluator = RouteEvaluator(urgent_boxes, self.drones, self.legs)
+        units = {"U01": TransportUnit("U01", "A", "O01")}
+        batteries = {
+            "A-BAT-01": TransportBattery("A-BAT-01", "A", 1000),
+            "A-BAT-02": TransportBattery("A-BAT-02", "A", 1000),
+        }
+        # 故意把宽松架次放在前面；MILP应允许紧急架次先执行，而非服从输入顺序。
+        routes = (
+            RoutePlan(("B1",), ("S001",)),
+            RoutePlan(("B2",), ("S002",)),
+        )
+        result = schedule_routes_milp(
+            routes, evaluator, urgent_boxes, units, batteries,
+            DeadlinePolicy.ALL_HARD,
+            time_limit_per_stage_s=1.0,
+        )
+        schedule = result.schedule
+        delivered = {
+            box_id: trip.delivery_time(box_id)
+            for trip in schedule.trips for box_id in trip.route.box_ids
+        }
+        self.assertLess(delivered["B2"], delivered["B1"])
+        self.assertEqual(schedule.objective.hard_violation_count, 0)
+        checks = validate_q2_solution(
+            schedule, urgent_boxes, self.drones, units, batteries, evaluator
+        )
+        self.assertTrue(all(row.passed for row in checks))
+
+    def test_milp_scheduler_soft_policy_penalizes_ordinary_expected_time(self) -> None:
+        boxes = {
+            "B1": Box("B1", "S001", "医疗物资", 4, 0.1, False, None, 1000, 10),
+            "B2": Box("B2", "S002", "饮用水", 3, 0.1, False, None, 1, 2),
+        }
+        evaluator = RouteEvaluator(boxes, self.drones, self.legs)
+        units = {"U01": TransportUnit("U01", "A", "O01")}
+        batteries = {"A-BAT-01": TransportBattery("A-BAT-01", "A", 1000)}
+        result = schedule_routes_milp(
+            (
+                RoutePlan(("B1",), ("S001",)),
+                RoutePlan(("B2",), ("S002",)),
+            ),
+            evaluator, boxes, units, batteries,
+            DeadlinePolicy.ORDINARY_SOFT,
+            time_limit_per_stage_s=1.0,
+        )
+        self.assertEqual(result.schedule.objective.hard_violation_count, 0)
+        self.assertGreater(result.schedule.objective.weighted_soft_tardiness, 0)
+        self.assertIn("weighted_soft_tardiness", [stage.objective for stage in result.stages])
+
+    def test_milp_scheduler_scipy_fallback_is_independently_usable(self) -> None:
+        units = {"U01": TransportUnit("U01", "A", "O01")}
+        batteries = {"A-BAT-01": TransportBattery("A-BAT-01", "A", 1000)}
+        result = schedule_routes_milp(
+            (RoutePlan(("B1", "B2"), ("S001", "S002")),),
+            self.evaluator,
+            self.boxes,
+            units,
+            batteries,
+            DeadlinePolicy.ORDINARY_SOFT,
+            time_limit_per_stage_s=2.0,
+            backend="scipy",
+        )
+        self.assertEqual(result.backend, "scipy")
+        self.assertEqual(result.schedule.objective.hard_violation_count, 0)
+        self.assertEqual(len(result.schedule.trips), 1)
 
     def test_pareto_filter_and_representative_selection(self) -> None:
         def result(soft: float, makespan: float, energy: float, trips: int) -> ScheduleResult:

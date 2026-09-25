@@ -1,0 +1,108 @@
+{
+  "additional_route_sources": [
+    "/Users/ada/Documents/ChatGPT/huawei_cup_modeling/huawei_project/outputs/q2b_time",
+    "/Users/ada/Documents/ChatGPT/huawei_cup_modeling/huawei_project/outputs/q2b_joint_hard",
+    "/Users/ada/Documents/ChatGPT/huawei_cup_modeling/huawei_project/outputs/q2b_joint_soft"
+  ],
+  "algorithm": "B3 ALNS transport search + Top-K event-driven screening + continuous-time MILP resource scheduling + critical-resource feedback",
+  "checks": {
+    "通过": 530
+  },
+  "configuration": {
+    "candidates_per_round": 6,
+    "cooling_rate": 0.997,
+    "description": "强化版B+-H：恢复B3强ALNS外层 + Top-K事件驱动筛选 + MILP联合资源复排；普通物资期望送达时间为硬时间窗。",
+    "exact_top_k": 3,
+    "feedback_rounds": 1,
+    "initial_candidate_limit": 8,
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 600,
+    "max_removal_count": 8,
+    "milp_rel_gap": 0.0001,
+    "milp_time_limit_per_stage_s": 30.0,
+    "min_removal_count": 2,
+    "reaction_factor": 0.2,
+    "seed_base": 20260924,
+    "seeds_per_profile": 10,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 120.0,
+    "update_period": 50
+  },
+  "deadline_policy": "all_hard",
+  "effective_configuration": {
+    "candidates_per_round": 6,
+    "cooling_rate": 0.997,
+    "exact_top_k": 3,
+    "feedback_rounds": 1,
+    "initial_candidate_limit": 0,
+    "initial_temperature": 0.05,
+    "log_period": 20,
+    "max_iterations": 0,
+    "max_removal_count": 8,
+    "milp_rel_gap": 0.0001,
+    "milp_time_limit_per_stage_s": 10.0,
+    "min_removal_count": 2,
+    "reaction_factor": 0.2,
+    "seed_base": 20260924,
+    "seeds_per_profile": 0,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 120.0,
+    "update_period": 50
+  },
+  "evaluated_route_sets": 4,
+  "joint_best_objective": {
+    "energy_kwh": 72.26086280786618,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 6421.012125432562,
+    "trip_count": 24,
+    "weighted_soft_tardiness": 0.0
+  },
+  "milp_all_stages_optimal": false,
+  "milp_backend": "gurobi",
+  "milp_stages": [
+    {
+      "dual_bound": 0.0,
+      "mip_gap": 0.0,
+      "objective": "hard_violation_count",
+      "status": "CONSTANT",
+      "value": 0.0,
+      "wall_time_s": 0.0
+    },
+    {
+      "dual_bound": 0.0,
+      "mip_gap": 0.0,
+      "objective": "hard_tardiness_s",
+      "status": "CONSTANT",
+      "value": 0.0,
+      "wall_time_s": 0.0
+    },
+    {
+      "dual_bound": 4514.946182530167,
+      "mip_gap": 0.29684820798776934,
+      "objective": "makespan_s",
+      "status": "FEASIBLE_LIMIT",
+      "value": 6421.01212543256,
+      "wall_time_s": 10.09975341700192
+    },
+    {
+      "dual_bound": 70.18372473100692,
+      "mip_gap": 0.02874499412471924,
+      "objective": "energy_kwh",
+      "status": "FEASIBLE_LIMIT",
+      "value": 72.26086280786618,
+      "wall_time_s": 10.113375041008112
+    }
+  ],
+  "outer_best_objective": {
+    "energy_kwh": 67.67053144311481,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 8347.474797307525,
+    "trip_count": 21,
+    "weighted_soft_tardiness": 0.0
+  },
+  "outer_search_deadline_policy": "all_hard shared candidate pool",
+  "outer_search_implementation": "solve_q2_alns (B3 strong skeleton)"
+}

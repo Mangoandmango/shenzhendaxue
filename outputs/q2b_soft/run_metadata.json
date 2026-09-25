@@ -1,0 +1,33 @@
+{
+  "algorithm": "ALNS + event-driven joint drone-battery scheduling",
+  "baseline_objective": {
+    "energy_kwh": 65.06949193957726,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 13443.325477001623,
+    "trip_count": 16,
+    "weighted_soft_tardiness": 800665.08886112
+  },
+  "best_objective": {
+    "energy_kwh": 77.0820900316575,
+    "hard_tardiness_s": 0.0,
+    "hard_violation_count": 0,
+    "makespan_s": 10459.283407462524,
+    "trip_count": 24,
+    "weighted_soft_tardiness": 324085.83241647464
+  },
+  "checks": {
+    "通过": 481
+  },
+  "configuration": {
+    "description": "方案B混合时间窗版：医疗期望与首批截止为硬约束，其他货箱期望时间按优先系数加权迟到进入及时性目标。",
+    "max_iterations": 800,
+    "seed_base": 20260924,
+    "seeds_per_profile": 4,
+    "stall_iterations": 300,
+    "time_limit_per_run_s": 90.0,
+    "top_k": 3
+  },
+  "deadline_policy": "医疗物资期望送达时间、首批保障截止时间为硬约束；其他货箱期望送达时间为按应急优先系数加权的软约束",
+  "pareto_count": 36
+}

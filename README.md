@@ -10,17 +10,10 @@
 - `matplotlib`：生成结果图
 - `pytest`：运行公共公式测试
 
-在 PyCharm 中打开本目录，创建虚拟环境后执行：
+在 PyCharm 中打开本目录，创建虚拟环境后安装依赖：
 
 ```bash
 python -m pip install -r requirements.txt
-python scripts/prepare_data.py
-python scripts/run_q1.py
-python scripts/run_q1_sensitivity.py
-python scripts/run_q2.py
-python scripts/run_q2_soft.py
-python scripts/run_q2b.py
-python scripts/run_q2b_time.py
 python -m unittest discover -s tests -v
 ```
 
@@ -33,7 +26,29 @@ huawei-q2
 huawei-q2-soft
 huawei-q2b
 huawei-q2b-time
+huawei-q2b-soft
+huawei-q2b-joint --policy ordinary_soft
+huawei-q2b-joint --policy all_hard
 ```
+
+## 运行入口：正式、对比与历史脚本
+
+不要按脚本文件名猜测其结果口径。下表是当前唯一有效的分类；所有正式运行均使用
+`O01_WGS84_ENU_SUPERCOVER_V2` 的 ENU—supercover 几何缓存，**不使用 Haversine 距离**。
+
+| 类别 | 脚本/命令 | 用途、输出与注意事项 |
+|---|---|---|
+| 公共预处理（正式） | `python scripts/prepare_data.py` | 从原始附件重建清洗数据与 ENU 航段缓存。仅在原始节点、DEM 或公共预处理代码改变后运行；随后应重新运行受影响的问题。 |
+| 问题一基准（正式） | `python scripts/run_q1.py` | 当前问题一的正式复现入口，输出至 `outputs/q1/`。已调用 ENU 航段、RasterPixelIsPoint 半像元和 supercover DEM 穿越。 |
+| 问题一敏感性（正式补充） | `python scripts/run_q1_sensitivity.py` | 在不同返航安全余量下独立重算，输出至 `outputs/q1/sensitivity/`；不替代问题一基准结果。 |
+| 问题二 A-S（正式基线） | `python scripts/run_q2_soft.py` | 方案 A，普通物资期望送达时间为软窗；输出至 `outputs/q2_soft/`。它既是正式基线，也是 B+ 的热启动来源。 |
+| 问题二 B+-S（正式强化） | `python scripts/run_q2b_joint.py --policy ordinary_soft` | 强化方案 B+，普通物资期望时间为软窗；输出至 `outputs/q2b_joint_soft/`。 |
+| 问题二 B+-H（正式强化） | `python scripts/run_q2b_joint.py --policy all_hard` | 强化方案 B+，普通物资期望时间也为硬窗；输出至 `outputs/q2b_joint_hard/`。 |
+| 问题二软/硬对比（诊断） | `python scripts/run_q2b_joint_comparison.py` | 把两次 B+ 的候选运输结构置于同一候选池，以两种时间窗分别 MILP 复评；输出至 `outputs/q2b_joint_comparison/`。用于控制候选覆盖差异，不取代两次正式独立运行。 |
+| 问题三入口 | `python scripts/run_q3.py` | 问题三通信视线与中继基线；与问题一、二的正式结果无关，当前不应因运行问题一、二而自动重跑。 |
+| 历史基线/消融 | `run_q2.py`、`run_q2b.py`、`run_q2b_time.py`、`run_q2b_soft.py` | 保留以复现早期方案、B0--B3 消融和迁移核验；**不得**作为 A-S、B+-S、B+-H 的正式最终结果入口。 |
+
+问题二的正式复现顺序为：先确认 ENU 缓存已经由 `prepare_data.py` 构建，再运行 A-S、B+-S、B+-H，最后按需要运行共享候选池比较。B+-S 与 B+-H 的正式结果必须分别读取各自目录的 `run_metadata.json`、`tables/MILP逐层求解记录.csv` 与最终方案表；限时 MILP 的 `MIP gap` 仅反映固定候选运输结构下的排程界差，不能被写成整体全局最优差距。
 
 ## 数据纪律
 
@@ -54,14 +69,18 @@ huawei-q2b-time
 
 ## 当前问题二口径
 
-问题二的“增强型方案 A”将所有物资的期望送达时间都视为硬时间窗；首批保障货箱还同时受首批截止时间限制，有效截止时间取两者较早值。模型使用 5 个确定性初始服务区序列和默认 20 个固定随机种子，通过动态规划切分、实体机与电池列表调度及硬时限冲突修复搜索可行方案。每个起点都分别执行完工时间、能耗和架次三种有效偏好搜索，再对全部零违约候选解提取 Pareto 前沿。由于可行解的迟到均为0，及时性代表方案取零违约解中完工最早者。
+正式比较只保留三种情况：
 
-默认单种子最多迭代 5000 次，连续 800 次无改进提前停止，并受 60 秒单种子时间上限约束。配置位于 `configs/q2.toml`，命令行可缩短参数用于冒烟测试。
+1. **A-S**：方案 A；医疗物资期望送达时间与首批保障截止时间为硬约束，普通物资期望送达时间为软时间窗。
+2. **B+-S**：强化版方案 B；时间窗口径与 A-S 相同。
+3. **B+-H**：强化版方案 B；所有物资期望送达时间均为硬时间窗，首批保障货箱还同时受首批截止时间限制，取较早者。
 
-电池占用区间从架次开始延续到返航后充至 100%，无人机则在返航后可换用另一组同型号满电电池。输出包括提交模板所需运输架次和逐箱交付表、无人机与电池时序、逐航段载荷、独立复核、多起点稳定性、Pareto 前沿与代表方案，以及使用相同资源和物理口径的单点直投基线。
+A-S 由 `python scripts/run_q2_soft.py` 运行。B+-S 与 B+-H 统一由 `python scripts/run_q2b_joint.py` 运行，仅通过 `--policy ordinary_soft` 或 `--policy all_hard` 切换 MILP 时间窗口径。两版 B+ 共用旧 B3 的强 ALNS 外层：方案 A 热启动、7 类基础破坏算子、4 类关键资源链破坏算子、6 类修复算子、关键链邻域、Top-K 事件驱动筛选、随机种子和计算预算。旧 B3 的 23 架次路线也作为两版不可缺少的候选结构。
 
-方案 B 使用 `python scripts/run_q2b.py` 独立运行，不覆盖方案 A 结果。它以方案 A 的已复核方案热启动，用有序架次、机型和货箱集合作为 ALNS 编码，通过 7 类破坏算子、6 类修复算子、自适应权重和模拟退火接受准则搜索；每个候选解由事件驱动解码器联合分配实体无人机、共享电池和开始时刻。配置位于 `configs/q2b.toml`，结果位于 `outputs/q2b/`，包括多种子统计、收敛记录、算子权重、消融实验、Pareto 方案和独立复核。
+B+ 采用“两层协调”求解：外层 B3-ALNS 搜索货箱组批、服务区访问次序和架次边界，并以事件驱动排程作 Top-K 快速筛选；内层连续时间 MILP 对 Top-K、方案 A 热启动和旧 B3 路线同时决定可行机型、实体无人机、共享电池、架次先后关系与开始时刻。MILP 对已形成的运输结构不再使用贪心资源解码。MILP 排程形成的完工关键链与电池关键链会反馈为架次切分和跨架次服务区移动邻域，再由 MILP 复评。
 
-`python scripts/run_q2_soft.py` 是普通物资软时间窗对照实验，不是问题二最终约束口径。该实验仅将医疗物资期望送达时间和首批保障截止时间设为硬约束；普通物资期望送达时间按“应急优先系数 × 正迟到时间”进入及时性目标。代码、配置和结果分别隔离在 `q2_*_soft.py`、`configs/q2_soft.toml` 和 `outputs/q2_soft/`，用于与最终采用的全货箱硬时间窗方案比较。
+目标按字典序逐层求解，不使用任意大权重：硬违约数、硬迟到、普通物资加权软迟到（仅软口径）、完工时间、总能耗。电池从架次开始占用到返航后充至 100%，无人机返航后即可换用同型号满电电池继续执行任务。默认优先使用 Gurobi；不可用时回退到 SciPy/HiGHS。限时求解时必须连同每层状态、对偶界和 MIP gap 报告，不能把限时可行解表述为全局最优解。
 
-完工时间强化版使用 `python scripts/run_q2b_time.py`，按 B0 加权目标基线、B1 字典序完工目标、B2 关键无人机/电池资源链邻域、B3 全局 Top-K 事件驱动精确复算逐步启用模块。四组共享实例、热启动、随机种子和搜索预算；结果写入 `outputs/q2b_time/`，包括跨种子均值/标准差、计算代价、消融图和B3最终方案的完整资源可行性复核。
+正式配置位于 `configs/q2b_joint_soft.toml` 与 `configs/q2b_joint_hard.toml`，两者搜索预算保持一致；独立搜索结果分别写入 `outputs/q2b_joint_soft/` 与 `outputs/q2b_joint_hard/`。为避免启发式候选覆盖差异干扰软/硬口径比较，还要把两次独立运行的运输结构合并为共享候选池，在两种口径下分别用 MILP 复评；公平比较结果写入 `outputs/q2b_joint_comparison/`。每次运行输出最终运输、无人机、电池和逐箱时序，MILP 逐层求解记录、反馈候选记录、独立复核与 `run_metadata.json`。
+
+`run_q2.py`、`run_q2b.py`、`run_q2b_time.py` 和 `run_q2b_soft.py` 保留为历史基线、消融与迁移核验入口，不再作为上述三种正式方案的结果入口。

@@ -10,9 +10,10 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from uav_rescue.geo.coordinates import LocalEnu, haversine_m  # noqa: E402
+from uav_rescue.geo.coordinates import LocalEnu  # noqa: E402
 from uav_rescue.geo.dem import DemGrid  # noqa: E402
 from uav_rescue.io.readers import (  # noqa: E402
+    ENU_GEOMETRY_DEFINITION,
     load_boxes,
     load_nodes,
     load_transport_drones,
@@ -83,7 +84,7 @@ def extract_communication_parameters(path: Path) -> list[tuple]:
     raise ValueError("通信参数表缺少表头")
 
 
-def build_leg_cache(nodes: dict, dem: DemGrid) -> tuple[list[list[object]], list[list[object]]]:
+def build_leg_cache(nodes: dict, dem: DemGrid, enu: LocalEnu) -> tuple[list[list[object]], list[list[object]]]:
     """预计算航段几何摘要及按穿越顺序保存的完整 DEM 地形剖面。"""
 
     geometry_rows: list[list[object]] = []
@@ -92,23 +93,31 @@ def build_leg_cache(nodes: dict, dem: DemGrid) -> tuple[list[list[object]], list
         for destination_id, destination in sorted(nodes.items()):
             if origin_id == destination_id:
                 continue
-            cells = dem.traversed_cells(origin.lon, origin.lat, destination.lon, destination.lat)
-            profile = dem.terrain_profile(cells)
-            horizontal_distance = haversine_m(origin, destination)
-            max_terrain = max(sample[4] for sample in profile)
+            horizontal_distance, records = dem.trace_enu_segment(
+                enu, origin.lon, origin.lat, destination.lon, destination.lat,
+            )
+            traversed = dem.positive_intersections(records)
+            max_terrain = max(record.elevation_m for record in traversed)
             geometry_rows.append([
                 origin_id, destination_id, horizontal_distance, max_terrain,
-                max_terrain + 50.0, len(cells),
+                max_terrain + 50.0, len({(record.row, record.col) for record in traversed}),
             ])
-            denominator = max(1, len(profile) - 1)
-            for sequence, (row, col, lon, lat, elevation) in enumerate(profile):
-                # 该距离按格网穿越顺序等比例标记；保留 row/col 可在问题三重建更精细的视线采样。
-                fraction = sequence / denominator
+            for sequence, record in enumerate(records):
                 profile_rows.append([
-                    origin_id, destination_id, sequence, fraction * horizontal_distance, fraction,
-                    row, col, lon, lat, elevation,
+                    origin_id, destination_id, sequence,
+                    record.row, record.col, record.elevation_m,
+                    record.s_in_m, record.s_out_m, record.intersection_length_m,
+                    record.contact_type,
                 ])
     return geometry_rows, profile_rows
+
+
+def node_enu_coordinates(enu: LocalEnu, node: object) -> tuple[float, float, float]:
+    """水平坐标与航段同样以 h=0 的 ENU 平面定义；Up 保留节点表高程信息。"""
+
+    east, north, _ = enu.from_geodetic_m(node.lon, node.lat, 0.0)
+    _, _, up = enu.from_geodetic_m(node.lon, node.lat, node.ground_m)
+    return east, north, up
 
 
 def main() -> None:
@@ -126,7 +135,7 @@ def main() -> None:
     dem = DemGrid(project_path(paths["dem"]))
     boxes = [box for service_boxes in boxes_by_service.values() for box in service_boxes]
     origin = nodes["O01"]
-    enu = LocalEnu(origin.lon, origin.lat, origin.ground_m)
+    enu = LocalEnu(origin.lon, origin.lat, 0.0)
 
     transport_units, transport_batteries = extract_transport_resources(project_path(paths["transport_workbook"]))
     relay_models, relay_units, relay_components = extract_relay_resources(project_path(paths["relay_workbook"]))
@@ -139,7 +148,7 @@ def main() -> None:
         "local_east_m", "local_north_m", "local_up_m", "population"
     ], [
         [node.node_id, "dispatch_center" if node.node_id == "O01" else "service_area", node.name, node.lon,
-         node.lat, node.ground_m, *enu.from_geodetic_m(node.lon, node.lat, node.ground_m), node.population]
+         node.lat, node.ground_m, *node_enu_coordinates(enu, node), node.population]
         for node in sorted(nodes.values(), key=lambda item: item.node_id)
     ])
     write_json(processed_dir / "coordinate_reference.json", {
@@ -149,7 +158,7 @@ def main() -> None:
         "origin_longitude_deg": origin.lon,
         "origin_latitude_deg": origin.lat,
         "origin_ground_elevation_m": origin.ground_m,
-        "horizontal_distance_note": "问题一仍按 Haversine 大圆距离计算；ENU 坐标供局部地图、三维视线和中继覆盖计算。",
+        "horizontal_distance_note": "所有航段、通信链路和 DEM 采样路径均按以 O01 为原点的 ENU 平面直线定义。",
     })
     write_csv(processed_dir / "boxes.csv", [
         "box_id", "service_id", "category", "mass_kg", "volume_m3", "is_first_batch",
@@ -198,15 +207,22 @@ def main() -> None:
     ], demand_rows)
 
     # 该缓存只含地形与距离信息，问题二、三可在此基础上叠加载荷、时间和通信约束。
-    leg_rows, profile_rows = build_leg_cache(nodes, dem)
+    leg_rows, profile_rows = build_leg_cache(nodes, dem, enu)
     write_csv(cache_dir / "leg_geometry.csv", [
         "origin_id", "destination_id", "horizontal_distance_m", "max_terrain_elevation_m",
         "cruise_altitude_m", "traversed_dem_cell_count"
     ], leg_rows)
     write_csv(cache_dir / "leg_terrain_profile.csv", [
-        "origin_id", "destination_id", "sample_index", "distance_from_origin_m", "path_fraction",
-        "dem_row", "dem_col", "longitude_deg", "latitude_deg", "terrain_elevation_m"
+        "origin_id", "destination_id", "record_index", "dem_row", "dem_col", "terrain_elevation_m",
+        "s_in_m", "s_out_m", "intersection_length_m", "contact_type"
     ], profile_rows)
+    write_json(cache_dir / "geometry_metadata.json", {
+        "geometry_definition": ENU_GEOMETRY_DEFINITION,
+        "horizontal_distance": "WGS84 local ENU Euclidean distance, origin O01",
+        "dem_path": "the same ENU straight line inverse-mapped to WGS84; half-pixel boundary roots solved on the mapped path",
+        "dem_pixel_reference": "RasterPixelIsPoint; pixel-center lattice with boundaries at index +/- 0.5",
+        "contact_policy": "cruise uses positive-length interior/boundary records; LOS uses interior records nominally and reports boundary/corner sensitivity; endpoint cells are excluded from LOS",
+    })
 
     # 按“服务区、物资类型”核对需求汇总表与逐箱清单。
     demand_counts = Counter((str(row[0]), str(row[1])) for row in demand_rows for _ in range(int(row[2])))
@@ -250,7 +266,7 @@ def main() -> None:
         },
         "warnings": [
             "节点表海拔与最近 DEM 像元存在分辨率与定位导致的差异；起降作业高度使用节点表，沿线净空使用 DEM。",
-            "leg_terrain_profile.csv 为完整格网穿越剖面；问题三进行精确视线判定时，应利用其 DEM 行列索引按候选飞行高度重新插值。"
+            "leg_terrain_profile.csv 保存 ENU-supercover 的真实路径区间与接触类型；巡航净空和通信遮挡分别使用各自上层判据。"
         ],
     }
     write_json(processed_dir / "data_audit.json", audit)

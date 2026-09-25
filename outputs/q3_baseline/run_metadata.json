@@ -1,0 +1,20 @@
+{
+  "transport_baseline": "outputs/q2/pareto/完工时间优先/运输架次.csv",
+  "trajectory_sample_count": 6773,
+  "blind_interval_count": 41,
+  "candidate_site_count": 912,
+  "feasible_column_count": 32292,
+  "selected_relay_sorties": 0,
+  "feedback_applied": false,
+  "feedback_error": "",
+  "original_candidate_set_conflicts": [
+    "T005-B01-S01"
+  ],
+  "uncovered_or_resource_conflict_intervals": [
+    "T005-B01-S01"
+  ],
+  "coarse_time_step_s": 5.0,
+  "status": "no_feasible_schedule_in_candidate_set",
+  "interpretation": "当前固定运输排程在离散候选集内未找到满足两架中继资源约束的排程，应触发方案A的运输时刻反馈修复",
+  "runtime_s": 557.772380334005
+}

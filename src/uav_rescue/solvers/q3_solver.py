@@ -1,4 +1,4 @@
-"""问题三方案 A 的确定性基线求解器。"""
+"""问题三方案1中继基线与方案2a时序错峰求解器。"""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ from uav_rescue.geo.coordinates import LocalEnu
 from uav_rescue.geo.dem import DemGrid
 from uav_rescue.io.readers import assert_enu_geometry_cache
 from uav_rescue.models.q3_joint import (
-    BlindInterval, CommunicationParameters, PositionSample, RelayColumn, RelaySite,
-    check_link, extract_blind_intervals,
+    BlindInterval, CommunicationParameters, LinkCheck, PositionSample, RelayColumn, RelaySite,
+    check_link, extract_blind_intervals, three_dimensional_distance_km,
 )
+from uav_rescue.communication.link_budget import free_space_path_loss_db
 from uav_rescue.physics.battery import recharge_time_s
 
 
@@ -126,17 +127,26 @@ def reconstruct_transport_samples(project: Path, time_step_s: float,
     return samples
 
 
-def find_blind_intervals(project: Path, dem: DemGrid, params: CommunicationParameters,
-                         samples: list[PositionSample], time_step_s: float) -> tuple[BlindInterval, ...]:
+def evaluate_direct_links(project: Path, dem: DemGrid, params: CommunicationParameters,
+                          samples: list[PositionSample]) -> dict[tuple[str, float], LinkCheck]:
+    """逐采样点计算运输机至 G01 的双向直连链路，用于独立审计和黑区提取。"""
     gateway_row = next(row for row in _rows(project / "data/processed/nodes.csv") if row["node_id"] == "O01")
     enu = LocalEnu(float(gateway_row["longitude_deg"]), float(gateway_row["latitude_deg"]), 0.0)
     gateway = (float(gateway_row["longitude_deg"]), float(gateway_row["latitude_deg"]),
                float(gateway_row["ground_elevation_m"]) + params.gateway_height_agl_m)
-    available: dict[tuple[str, float], bool] = {}
+    checks: dict[tuple[str, float], LinkCheck] = {}
     for sample in samples:
-        result = check_link(dem, enu, params, (sample.lon, sample.lat, sample.altitude_m), gateway,
-                            params.transport_gateway_limit_db)
-        available[(sample.trip_id, sample.time_s)] = result.available
+        checks[(sample.trip_id, sample.time_s)] = check_link(
+            dem, enu, params, (sample.lon, sample.lat, sample.altitude_m), gateway,
+            params.transport_gateway_limit_db,
+        )
+    return checks
+
+
+def find_blind_intervals(project: Path, dem: DemGrid, params: CommunicationParameters,
+                         samples: list[PositionSample], time_step_s: float) -> tuple[BlindInterval, ...]:
+    checks = evaluate_direct_links(project, dem, params, samples)
+    available = {key: check.available for key, check in checks.items()}
     return extract_blind_intervals(samples, available, time_step_s)
 
 
@@ -168,9 +178,113 @@ def generate_candidate_sites(dem: DemGrid, enu: LocalEnu,
     return tuple(sites)
 
 
+def generate_structured_candidate_sites(
+        dem: DemGrid, enu: LocalEnu, intervals: tuple[BlindInterval, ...],
+        heights_m: list[float], ray_fractions: list[float],
+        ) -> dict[str, tuple[RelaySite, ...]]:
+    """为每个黑区构造少量具物理含义的候选中继点。
+
+    锚点为运输机在黑区首、中、末的位置，以及黑区中点朝 G01 方向的若干位置。
+    每个锚点取多个离地高度；后续仍对该黑区所有采样点做严格 DEM 链路核验。
+    """
+    result: dict[str, tuple[RelaySite, ...]] = {}
+    for interval in intervals:
+        rows = interval.samples
+        first, middle, last = rows[0], rows[len(rows) // 2], rows[-1]
+        anchors = [(first.lon, first.lat), (middle.lon, middle.lat), (last.lon, last.lat)]
+        east, north, _ = enu.from_geodetic_m(middle.lon, middle.lat, 0.0)
+        for fraction in ray_fractions:
+            lon, lat, _ = enu.to_geodetic_m(fraction * east, fraction * north)
+            anchors.append((lon, lat))
+        unique: list[tuple[float, float]] = []
+        for lon, lat in anchors:
+            point = (round(lon, 9), round(lat, 9))
+            if point not in unique and dem.contains(*point):
+                unique.append(point)
+        sites: list[RelaySite] = []
+        for anchor_index, (lon, lat) in enumerate(unique, start=1):
+            ground = dem.elevation_at(lon, lat)
+            for height in heights_m:
+                sites.append(RelaySite(
+                    f"S{lon:.6f}-{lat:.6f}-H{int(height):03d}",
+                    lon, lat, ground, height,
+                ))
+        result[interval.interval_id] = tuple(sites)
+    return result
+
+
+def _column_concurrency(intervals: tuple[BlindInterval, ...],
+                        covered_interval_ids: tuple[str, ...]) -> tuple[int, int]:
+    covered = set(covered_interval_ids)
+    counts: dict[float, int] = defaultdict(int)
+    sample_count = 0
+    for interval in intervals:
+        if interval.interval_id not in covered:
+            continue
+        sample_count += len(interval.samples)
+        for sample in interval.samples:
+            counts[sample.time_s] += 1
+    return (max(counts.values()) if counts else 0), sample_count
+
+
+def _within_concurrency_limit(intervals: tuple[BlindInterval, ...],
+                              covered_interval_ids: tuple[str, ...],
+                              concurrent_transport_limit: int) -> bool:
+    if concurrent_transport_limit <= 0:
+        return True
+    maximum, _ = _column_concurrency(intervals, covered_interval_ids)
+    return maximum <= concurrent_transport_limit
+
+
+def _add_cover_if_capacity_allows(intervals_by_id: dict[str, BlindInterval],
+                                  selected: list[str], candidate_id: str,
+                                  concurrent_transport_limit: int) -> bool:
+    if concurrent_transport_limit <= 0:
+        selected.append(candidate_id)
+        return True
+    counts: dict[float, int] = defaultdict(int)
+    for interval_id in selected:
+        for sample in intervals_by_id[interval_id].samples:
+            counts[sample.time_s] += 1
+    for sample in intervals_by_id[candidate_id].samples:
+        if counts[sample.time_s] + 1 > concurrent_transport_limit:
+            return False
+    selected.append(candidate_id)
+    return True
+
+
+def _free_space_possible(enu: LocalEnu, params: CommunicationParameters,
+                         endpoint_a: tuple[float, float, float],
+                         endpoint_b: tuple[float, float, float], limit_db: float) -> bool:
+    """无地形附加损耗时都无法满足门限，则实际链路必然不可用。"""
+    return free_space_path_loss_db(
+        params.frequency_mhz,
+        three_dimensional_distance_km(enu, *endpoint_a, *endpoint_b),
+    ) <= limit_db + 1e-9
+
+
+def _free_space_margin(enu: LocalEnu, params: CommunicationParameters,
+                       endpoint_a: tuple[float, float, float],
+                       endpoint_b: tuple[float, float, float], limit_db: float) -> float:
+    return limit_db - free_space_path_loss_db(
+        params.frequency_mhz,
+        three_dimensional_distance_km(enu, *endpoint_a, *endpoint_b),
+    )
+
+
+def _representative_samples(interval: BlindInterval) -> tuple[PositionSample, ...]:
+    """完整服务必须覆盖的首、中、末采样点，用于严格但低成本的早期否决。"""
+    rows = interval.samples
+    selected = (rows[0], rows[len(rows) // 2], rows[-1])
+    return tuple(dict.fromkeys(selected))
+
+
 def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParameters,
                         intervals: tuple[BlindInterval, ...], sites: tuple[RelaySite, ...],
-                        max_per_interval: int) -> tuple[RelayColumn, ...]:
+                        max_per_interval: int,
+                        concurrent_transport_limit: int = 0,
+                        full_validation_site_limit: int = 0,
+                        sites_by_interval: dict[str, tuple[RelaySite, ...]] | None = None) -> tuple[RelayColumn, ...]:
     relay = _rows(project / "data/processed/relay_drones.csv")[0]
     component = _rows(project / "data/processed/relay_energy_components.csv")[0]
     origin = next(row for row in _rows(project / "data/processed/nodes.csv") if row["node_id"] == "O01")
@@ -181,18 +295,72 @@ def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParame
     usable = float(relay["usable_energy_kwh"])
     reserve = float(relay["reserve_ratio"]) / 100.0 if float(relay["reserve_ratio"]) > 1 else float(relay["reserve_ratio"])
     columns: list[RelayColumn] = []
+    intervals_by_id = {item.interval_id: item for item in intervals}
+    # 链路几何只取决于位置，和正在处理的黑区/候选列无关；缓存避免重复 DEM 剖面追踪。
+    backhaul_cache: dict[str, LinkCheck] = {}
+    access_cache: dict[tuple[str, str, float], LinkCheck] = {}
+
+    def backhaul_for(site: RelaySite) -> LinkCheck:
+        cached = backhaul_cache.get(site.site_id)
+        if cached is None:
+            endpoint = (site.lon, site.lat, site.altitude_m)
+            if not _free_space_possible(enu, params, endpoint, gateway, params.relay_gateway_limit_db):
+                # 该分支只用于提前否决；无需 DEM 剖面细节。
+                cached = LinkCheck(False, math.inf, params.relay_gateway_limit_db, -math.inf,
+                                   False, -math.inf, False, False)
+            else:
+                cached = check_link(dem, enu, params, endpoint, gateway, params.relay_gateway_limit_db)
+            backhaul_cache[site.site_id] = cached
+        return cached
+
+    def access_for(site: RelaySite, sample: PositionSample) -> LinkCheck:
+        key = (site.site_id, sample.trip_id, sample.time_s)
+        cached = access_cache.get(key)
+        if cached is None:
+            endpoint_a = (sample.lon, sample.lat, sample.altitude_m)
+            endpoint_b = (site.lon, site.lat, site.altitude_m)
+            if not _free_space_possible(enu, params, endpoint_a, endpoint_b,
+                                        params.transport_relay_limit_db):
+                cached = LinkCheck(False, math.inf, params.transport_relay_limit_db, -math.inf,
+                                   False, -math.inf, False, False)
+            else:
+                cached = check_link(dem, enu, params, endpoint_a, endpoint_b,
+                                    params.transport_relay_limit_db)
+            access_cache[key] = cached
+        return cached
+
     for interval in intervals:
         feasible: list[RelayColumn] = []
-        for site in sites:
-            backhaul = check_link(dem, enu, params, (site.lon, site.lat, site.altitude_m), gateway,
-                                  params.relay_gateway_limit_db)
+        candidate_sites = sites_by_interval.get(interval.interval_id, ()) if sites_by_interval else sites
+        if full_validation_site_limit > 0 and len(sites) > full_validation_site_limit:
+            scored: list[tuple[float, RelaySite]] = []
+            for site in sites:
+                endpoint = (site.lon, site.lat, site.altitude_m)
+                margins = [_free_space_margin(
+                    enu, params, endpoint, gateway, params.relay_gateway_limit_db,
+                )]
+                margins.extend(_free_space_margin(
+                    enu, params, (sample.lon, sample.lat, sample.altitude_m), endpoint,
+                    params.transport_relay_limit_db,
+                ) for sample in _representative_samples(interval))
+                if min(margins) >= -1e-9:
+                    scored.append((min(margins), site))
+            candidate_sites = tuple(site for _, site in sorted(
+                scored, key=lambda item: (-item[0], item[1].site_id),
+            )[:full_validation_site_limit])
+        for site in candidate_sites:
+            backhaul = backhaul_for(site)
             if not backhaul.available:
                 continue
             margins = [backhaul.margin_db]
+            representatives = _representative_samples(interval)
+            representative_checks = [access_for(site, sample) for sample in representatives]
+            margins.extend(check.margin_db for check in representative_checks)
+            if not all(check.available for check in representative_checks):
+                continue
             ok = True
             for sample in interval.samples:
-                access = check_link(dem, enu, params, (sample.lon, sample.lat, sample.altitude_m),
-                                    (site.lon, site.lat, site.altitude_m), params.transport_relay_limit_db)
+                access = access_for(site, sample)
                 margins.append(access.margin_db)
                 if not access.available:
                     ok = False
@@ -238,24 +406,26 @@ def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParame
                     continue
                 if other.start_s + 1e-7 < interval.start_s or other.end_s > interval.end_s + 1e-7:
                     continue
-                if all(check_link(
-                    dem, enu, params, (sample.lon, sample.lat, sample.altitude_m),
-                    (site.lon, site.lat, site.altitude_m), params.transport_relay_limit_db,
-                ).available for sample in other.samples):
-                    covered.append(other.interval_id)
-            feasible.append(RelayColumn("", site, tuple(sorted(covered)), interval.start_s, interval.end_s,
+                if all(access_for(site, sample).available for sample in other.samples):
+                    _add_cover_if_capacity_allows(
+                        intervals_by_id, covered, other.interval_id, concurrent_transport_limit
+                    )
+            covered_ids = tuple(sorted(covered))
+            max_concurrent, covered_samples = _column_concurrency(intervals, covered_ids)
+            feasible.append(RelayColumn("", site, covered_ids, max_concurrent, covered_samples,
+                                        interval.start_s, interval.end_s,
                                         mission_start, return_s, unit_release, energy, end_soc,
                                         component_release, min(margins)))
         feasible.sort(key=lambda col: (-col.minimum_margin_db, col.energy_kwh, col.site.site_id))
         for rank, column in enumerate(feasible[:max_per_interval], start=1):
             columns.append(RelayColumn(f"{interval.interval_id}-C{rank:02d}", column.site,
-                                       column.covered_interval_ids, column.service_start_s,
+                                       column.covered_interval_ids, column.max_concurrent_transports,
+                                       column.covered_sample_count, column.service_start_s,
                                        column.service_end_s, column.mission_start_s, column.return_s,
                                        column.unit_release_s, column.energy_kwh, column.end_soc,
                                        column.component_release_s, column.minimum_margin_db))
     # 构造“持续驻留列”：同一悬停点可跨过短暂无需求时段继续悬停，
     # 避免上一架次返航周转尚未结束、下一批黑区已经出现的假性无解。
-    interval_by_id = {item.interval_id: item for item in intervals}
     by_site: dict[str, dict[str, RelayColumn]] = defaultdict(dict)
     for column in columns:
         interval_id = column.covered_interval_ids[0]
@@ -267,17 +437,21 @@ def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParame
     setup = float(relay["link_setup_s"])
     full_charge = float(component["full_charge_time_s"])
     for site_id, available in by_site.items():
-        ordered = sorted(available, key=lambda item: (interval_by_id[item].start_s, interval_by_id[item].end_s))
+        ordered = sorted(available, key=lambda item: (intervals_by_id[item].start_s, intervals_by_id[item].end_s))
         for left in range(len(ordered)):
             group = [ordered[left]]
             for right in range(left + 1, len(ordered)):
-                previous = interval_by_id[group[-1]]
-                current = interval_by_id[ordered[right]]
+                previous = intervals_by_id[group[-1]]
+                current = intervals_by_id[ordered[right]]
                 if current.start_s - previous.end_s > 1_800.0:
                     break
                 group.append(ordered[right])
-                first = interval_by_id[group[0]]
-                last = interval_by_id[group[-1]]
+                covered_ids = tuple(sorted(set(group)))
+                if not _within_concurrency_limit(intervals, covered_ids, concurrent_transport_limit):
+                    group.pop()
+                    continue
+                first = intervals_by_id[group[0]]
+                last = intervals_by_id[group[-1]]
                 base = available[group[0]]
                 base_duration = base.service_end_s - base.service_start_s
                 travel_energy = base.energy_kwh - service_power * (setup + base_duration) / 3600.0
@@ -288,9 +462,10 @@ def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParame
                 return_delta = base.return_s - base.service_end_s
                 turnaround_delta = base.unit_release_s - base.return_s
                 return_s = last.end_s + return_delta
+                max_concurrent, covered_samples = _column_concurrency(intervals, covered_ids)
                 persistent.append(RelayColumn(
                     f"{site_id}-P{left + 1:02d}-{right + 1:02d}", base.site,
-                    tuple(sorted(set(group))), first.start_s, last.end_s,
+                    covered_ids, max_concurrent, covered_samples, first.start_s, last.end_s,
                     base.mission_start_s, return_s, return_s + turnaround_delta,
                     energy, end_soc, return_s + recharge_time_s(end_soc, full_charge),
                     min(available[item].minimum_margin_db for item in group),
@@ -300,13 +475,21 @@ def build_relay_columns(project: Path, dem: DemGrid, params: CommunicationParame
 
 
 def select_and_assign_columns(intervals: tuple[BlindInterval, ...], columns: tuple[RelayColumn, ...],
-                              relay_count: int = 2, component_count: int = 6) -> tuple[list[tuple[RelayColumn, int, int]], list[str]]:
+                              relay_count: int = 2, component_count: int = 6,
+                              concurrent_transport_limit: int = 0,
+                              diagnostics: dict[str, object] | None = None,
+                              ) -> tuple[list[tuple[RelayColumn, int, int]], list[str]]:
     by_interval: dict[str, list[RelayColumn]] = defaultdict(list)
     for column in columns:
+        if concurrent_transport_limit > 0 and column.max_concurrent_transports > concurrent_transport_limit:
+            continue
         for interval_id in column.covered_interval_ids:
             by_interval[interval_id].append(column)
     missing = [item.interval_id for item in intervals if not by_interval[item.interval_id]]
     if missing:
+        if diagnostics is not None:
+            diagnostics.update({"reason": "missing_candidate_column", "missing_intervals": missing,
+                                "visited_nodes": 0, "node_limit_reached": False})
         return [], missing
     uncovered = {item.interval_id for item in intervals}
     order = {item.interval_id: (item.start_s, item.end_s) for item in intervals}
@@ -315,13 +498,16 @@ def select_and_assign_columns(intervals: tuple[BlindInterval, ...], columns: tup
 
     visited = 0
     node_limit = 250_000
+    node_limit_reached = False
+    dead_end_counts: dict[str, int] = defaultdict(int)
 
     def search(remaining: frozenset[str], unit_free: tuple[float, ...],
                component_free: tuple[float, ...],
                chosen: list[tuple[RelayColumn, int, int]]) -> list[tuple[RelayColumn, int, int]] | None:
-        nonlocal visited
+        nonlocal visited, node_limit_reached
         visited += 1
         if visited > node_limit:
+            node_limit_reached = True
             return None
         if not remaining:
             return chosen
@@ -358,13 +544,173 @@ def select_and_assign_columns(intervals: tuple[BlindInterval, ...], columns: tup
                     )
                     if result is not None:
                         return result
+        dead_end_counts[target] += 1
         return None
 
     result = search(frozenset(uncovered), tuple(0.0 for _ in range(relay_count)),
                     tuple(0.0 for _ in range(component_count)), [])
+    if diagnostics is not None:
+        diagnostics.update({
+            "reason": "feasible" if result is not None else (
+                "search_node_limit" if node_limit_reached else "resource_infeasible_in_explored_candidates"),
+            "visited_nodes": visited,
+            "node_limit": node_limit,
+            "node_limit_reached": node_limit_reached,
+            "most_frequent_dead_end_intervals": [
+                interval_id for interval_id, _ in sorted(dead_end_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
+            ],
+        })
     if result is None:
         return [], [min(uncovered, key=lambda item: order[item])]
     return result, []
+
+
+def select_and_assign_columns_beam(
+        intervals: tuple[BlindInterval, ...], columns: tuple[RelayColumn, ...],
+        relay_count: int = 2, component_count: int = 6,
+        concurrent_transport_limit: int = 0, beam_width: int = 256,
+        options_per_state: int = 24,
+        ) -> tuple[list[tuple[RelayColumn, int, int]], list[str], dict[str, object]]:
+    """保留多条资源时间线的束搜索，不把同覆盖集合的候选列硬截断。"""
+    by_interval: dict[str, list[RelayColumn]] = defaultdict(list)
+    for column in columns:
+        if concurrent_transport_limit <= 0 or column.max_concurrent_transports <= concurrent_transport_limit:
+            for interval_id in column.covered_interval_ids:
+                by_interval[interval_id].append(column)
+    missing = [item.interval_id for item in intervals if not by_interval[item.interval_id]]
+    if missing:
+        return [], missing, {"reason": "missing_candidate_column", "expanded_states": 0}
+    order = {item.interval_id: (item.start_s, item.end_s) for item in intervals}
+    initial = (frozenset(order), tuple(0.0 for _ in range(relay_count)),
+               tuple(0.0 for _ in range(component_count)), tuple(), 0.0)
+    frontier = [initial]
+    expanded = 0
+    for _ in range(len(intervals)):
+        next_states = []
+        for remaining, unit_free, component_free, chosen, energy in frontier:
+            if not remaining:
+                return list(chosen), [], {"reason": "feasible", "expanded_states": expanded,
+                                          "beam_width": beam_width}
+            target = min(remaining, key=lambda item: order[item])
+            options = sorted(by_interval[target], key=lambda col: (
+                -len(remaining.intersection(col.covered_interval_ids)), col.energy_kwh,
+                -col.minimum_margin_db, col.column_id,
+            ))[:options_per_state]
+            for column in options:
+                units = [i for i, free in enumerate(unit_free) if free <= column.mission_start_s + 1e-7]
+                components = [i for i, free in enumerate(component_free) if free <= column.mission_start_s + 1e-7]
+                for unit in units:
+                    for component in components:
+                        new_units = list(unit_free); new_units[unit] = column.unit_release_s
+                        new_components = list(component_free); new_components[component] = column.component_release_s
+                        next_states.append((
+                            remaining.difference(column.covered_interval_ids), tuple(new_units), tuple(new_components),
+                            chosen + ((column, unit + 1, component + 1),), energy + column.energy_kwh,
+                        ))
+                        expanded += 1
+        if not next_states:
+            break
+        # 相同剩余需求与同构资源释放状态仅保留累计能耗最低的代表。
+        unique: dict[tuple[object, ...], tuple] = {}
+        for state in next_states:
+            key = (state[0], tuple(sorted(round(x, 6) for x in state[1])),
+                   tuple(sorted(round(x, 6) for x in state[2])))
+            if key not in unique or state[4] < unique[key][4]:
+                unique[key] = state
+        frontier = sorted(unique.values(), key=lambda state: (
+            len(state[0]), state[4], max(state[1]), max(state[2]),
+        ))[:beam_width]
+    return [], [min(frontier[0][0], key=lambda item: order[item])] if frontier else [], {
+        "reason": "beam_exhausted_without_feasible_schedule", "expanded_states": expanded,
+        "beam_width": beam_width, "options_per_state": options_per_state,
+    }
+
+
+def select_and_assign_columns_cpsat(
+        intervals: tuple[BlindInterval, ...], columns: tuple[RelayColumn, ...],
+        relay_count: int = 2, component_count: int = 6,
+        concurrent_transport_limit: int = 0, max_time_s: float = 120.0,
+        ) -> tuple[list[tuple[RelayColumn, int, int]], list[str], dict[str, object]]:
+    """用 CP-SAT 精确处理服务列覆盖与中继/组件时间资源约束。"""
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError as error:
+        raise RuntimeError("CP-SAT 不可用；请安装 ortools 后再运行方案1正式调度。") from error
+    usable = [c for c in columns if concurrent_transport_limit <= 0 or c.max_concurrent_transports <= concurrent_transport_limit]
+    by_interval: dict[str, list[int]] = defaultdict(list)
+    for index, column in enumerate(usable):
+        for interval_id in column.covered_interval_ids:
+            by_interval[interval_id].append(index)
+    missing = [item.interval_id for item in intervals if not by_interval[item.interval_id]]
+    if missing:
+        return [], missing, {"reason": "missing_candidate_column", "solver_status": "MODEL_INVALID"}
+    scale = 10  # 0.1 秒整数时间轴，保留现有连续时间计算精度。
+    moment = lambda value: int(round(value * scale))
+    model = cp_model.CpModel()
+    selected = [model.NewBoolVar(f"select_{i}") for i in range(len(usable))]
+    assignment: dict[tuple[int, int, int], object] = {}
+    unit_intervals = [[] for _ in range(relay_count)]
+    component_intervals = [[] for _ in range(component_count)]
+    for i, column in enumerate(usable):
+        task_vars = []
+        for unit in range(relay_count):
+            unit_vars = []
+            # 禁止分别对 start、duration、end 取整：那会使极少数列在整数轴上
+            # 不满足 start + duration == end，进而被 CP-SAT 静默判为不可选。
+            unit_start = moment(column.mission_start_s)
+            unit_end = max(unit_start + 1, moment(column.unit_release_s))
+            duration = unit_end - unit_start
+            for component in range(component_count):
+                variable = model.NewBoolVar(f"z_{i}_{unit}_{component}")
+                assignment[(i, unit, component)] = variable
+                task_vars.append(variable); unit_vars.append(variable)
+            unit_used = model.NewBoolVar(f"unit_{i}_{unit}")
+            model.Add(sum(unit_vars) == unit_used)
+            unit_intervals[unit].append(model.NewOptionalIntervalVar(
+                unit_start, duration, unit_end, unit_used,
+                f"relay_interval_{i}_{unit}",
+            ))
+        for component in range(component_count):
+            component_vars = [assignment[(i, unit, component)] for unit in range(relay_count)]
+            component_used = model.NewBoolVar(f"component_{i}_{component}")
+            model.Add(sum(component_vars) == component_used)
+            component_start = moment(column.mission_start_s)
+            component_end = max(component_start + 1, moment(column.component_release_s))
+            duration = component_end - component_start
+            component_intervals[component].append(model.NewOptionalIntervalVar(
+                component_start, duration, component_end, component_used,
+                f"component_interval_{i}_{component}",
+            ))
+        model.Add(sum(task_vars) == selected[i])
+    for values in unit_intervals + component_intervals:
+        model.AddNoOverlap(values)
+    for interval in intervals:
+        model.Add(sum(selected[index] for index in by_interval[interval.interval_id]) >= 1)
+    energy_cost = [int(round(column.energy_kwh * 10_000)) for column in usable]
+    # 一个额外架次的惩罚高于所有可能能耗差，形成字典序近似：先架次、后能耗。
+    # 先最少架次、再最低能耗；系数严格大于所有列能耗总和，确保字典序。
+    sortie_penalty = sum(energy_cost) + 1
+    model.Minimize(sortie_penalty * sum(selected) + sum(energy_cost[i] * selected[i] for i in range(len(usable))))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = max_time_s
+    solver.parameters.num_search_workers = 8
+    status = solver.Solve(model)
+    status_name = solver.StatusName(status)
+    diagnostics = {"reason": "unknown", "solver_status": status_name,
+                   "wall_time_s": solver.WallTime(), "objective": solver.ObjectiveValue(),
+                   "best_bound": solver.BestObjectiveBound(), "column_count": len(usable)}
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        diagnostics["reason"] = "resource_infeasible" if status == cp_model.INFEASIBLE else "solver_time_limit_or_unknown"
+        return [], [], diagnostics
+    result = []
+    for i, column in enumerate(usable):
+        if solver.Value(selected[i]):
+            for unit in range(relay_count):
+                for component in range(component_count):
+                    if solver.Value(assignment[(i, unit, component)]):
+                        result.append((column, unit + 1, component + 1))
+    diagnostics["reason"] = "feasible"; diagnostics["selected_sorties"] = len(result)
+    return result, [], diagnostics
 
 
 def stagger_transport_schedule(project: Path, schedule_path: Path, deliveries_path: Path,

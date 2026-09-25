@@ -1,18 +1,37 @@
 [communication]
 trajectory_time_step_s = 5
 verification_time_step_s = 1
-terrain_clearance_m = 0.0
 blind_service_chunk_s = 300.0
 
+[scheme_1]
+name = "方案1 固定运输中继基线"
+description = "固定问题二正式运输方案，仅配置中继通信服务。"
+
+[scheme_2]
+name = "方案2 运输时序资源中继通信联合优化"
+description = "固定货箱组批、访问顺序、路线、机型和载荷；联合优化运输时序、同型实体资源与中继任务资源。"
+mode = "full_joint"
+allow_same_type_transport_reassignment = true
+allow_transport_battery_reassignment = true
+allow_transport_sequence_reordering = true
+allow_relay_continuous_residence = true
+allow_relay_direct_relocation = false
+time_grid_s = 30
+final_communication_validation_step_s = 0.25
+
 [baseline]
-transport_schedule = "outputs/q2/pareto/完工时间优先/运输架次.csv"
-transport_deliveries = "outputs/q2/pareto/完工时间优先/逐箱交付.csv"
+transport_schedule = "outputs/q2b_joint_soft/tables/最终方案/运输架次.csv"
+transport_deliveries = "outputs/q2b_joint_soft/tables/最终方案/逐箱交付与时间窗.csv"
 candidate_grid_step_m = 500.0
 candidate_height_levels_m = [100.0, 200.0, 300.0]
 candidate_ray_fractions = [0.25, 0.5, 0.75]
 candidate_neighbor_radius = 1
+candidate_strategy = "structured_per_interval"
+structured_ray_fractions = [0.35, 0.65]
 max_candidates_per_blind_interval = 200
+full_validation_site_limit = 0
 max_gap_steps_in_interval = 1
 objective = "lexicographic_sorties_energy_margin"
 relay_concurrent_transport_limit = 0
+# 方案2a必须以实际服务列/资源冲突为依据单独求解；不能沿用旧的“两通道”贪心错峰。
 enable_feedback = false

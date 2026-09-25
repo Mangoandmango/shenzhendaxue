@@ -41,11 +41,11 @@ huawei-q2b-joint --policy all_hard
 | 公共预处理（正式） | `python scripts/prepare_data.py` | 从原始附件重建清洗数据与 ENU 航段缓存。仅在原始节点、DEM 或公共预处理代码改变后运行；随后应重新运行受影响的问题。 |
 | 问题一基准（正式） | `python scripts/run_q1.py` | 当前问题一的正式复现入口，输出至 `outputs/q1/`。已调用 ENU 航段、RasterPixelIsPoint 半像元和 supercover DEM 穿越。 |
 | 问题一敏感性（正式补充） | `python scripts/run_q1_sensitivity.py` | 在不同返航安全余量下独立重算，输出至 `outputs/q1/sensitivity/`；不替代问题一基准结果。 |
-| 问题二 A-S（正式基线） | `python scripts/run_q2_soft.py` | 方案 A，普通物资期望送达时间为软窗；输出至 `outputs/q2_soft/`。它既是正式基线，也是 B+ 的热启动来源。 |
+| 问题二 A-S（对照与热启动） | `python scripts/run_q2_soft.py` | 方案 A，普通物资期望送达时间为软窗；重运行时输出至 `outputs/q2_soft/`。当前历史快照位于 `outputs/_archive/q2_soft/`；它用于对照与 B+ 热启动，不作为问题三固定输入。 |
 | 问题二 B+-S（正式强化） | `python scripts/run_q2b_joint.py --policy ordinary_soft` | 强化方案 B+，普通物资期望时间为软窗；输出至 `outputs/q2b_joint_soft/`。 |
 | 问题二 B+-H（正式强化） | `python scripts/run_q2b_joint.py --policy all_hard` | 强化方案 B+，普通物资期望时间也为硬窗；输出至 `outputs/q2b_joint_hard/`。 |
 | 问题二软/硬对比（诊断） | `python scripts/run_q2b_joint_comparison.py` | 把两次 B+ 的候选运输结构置于同一候选池，以两种时间窗分别 MILP 复评；输出至 `outputs/q2b_joint_comparison/`。用于控制候选覆盖差异，不取代两次正式独立运行。 |
-| 问题三入口 | `python scripts/run_q3.py` | 问题三通信视线与中继基线；与问题一、二的正式结果无关，当前不应因运行问题一、二而自动重跑。 |
+| 问题三方案 1 与方案 2 入口 | `python scripts/run_q3.py --stage demand` | 方案 1 固定问题二 B+-S 最终运输方案并生成中继基线；方案 2 在固定组批、访问顺序、路线、机型和载荷下，联合优化运输资源、中继任务与通信资源。问题二 B+-S 结果更新后，必须重新运行问题三。 |
 | 历史基线/消融 | `run_q2.py`、`run_q2b.py`、`run_q2b_time.py`、`run_q2b_soft.py` | 保留以复现早期方案、B0--B3 消融和迁移核验；**不得**作为 A-S、B+-S、B+-H 的正式最终结果入口。 |
 
 问题二的正式复现顺序为：先确认 ENU 缓存已经由 `prepare_data.py` 构建，再运行 A-S、B+-S、B+-H，最后按需要运行共享候选池比较。B+-S 与 B+-H 的正式结果必须分别读取各自目录的 `run_metadata.json`、`tables/MILP逐层求解记录.csv` 与最终方案表；限时 MILP 的 `MIP gap` 仅反映固定候选运输结构下的排程界差，不能被写成整体全局最优差距。
